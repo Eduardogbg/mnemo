@@ -1,0 +1,23 @@
+{
+  "name": "@mnemo/venice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "test:unit": "bun test test/unit/",
+    "test:integration": "bun test test/integration/",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/ai": "^0.33.2",
+    "@effect/platform": "^0.94.5",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
+    "effect": "^3.19.19"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
