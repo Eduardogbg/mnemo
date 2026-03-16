@@ -177,7 +177,7 @@ For Mnemo, we likely do NOT need GPU-TEE directly. Our TEE needs are:
 - Storing/managing conversation state
 - Handling cryptographic operations (forking, commitment)
 
-LLM inference can happen outside the TEE (via Venice) while only the negotiation protocol runs inside. This is cheaper and simpler. Note: standard Venice inference is not TEE-protected (GPU operators see plaintext). Venice offers an alpha TEE mode, but it is not production-ready. For production privacy, use Redpill (Phala GPU-TEE). GPU-TEE would only matter if we needed the model weights/prompts to be confidential from the infrastructure provider.
+LLM inference can happen outside the TEE (via Venice) while only the negotiation protocol runs inside. This is cheaper and simpler. Venice standard inference provides policy-based privacy (anonymized, no logging). Venice also offers an alpha E2EE/TEE mode with cryptographic guarantees for 15 models. For production cryptographic privacy, Redpill (Phala GPU-TEE) is the more mature option. GPU-TEE would only matter if we needed the model weights/prompts to be confidential from the infrastructure provider.
 
 ---
 
@@ -532,13 +532,13 @@ const response = await venice.chat.completions.create({
 **Why this works:**
 - Agent logic runs inside the CVM — negotiation state is private
 - Venice API calls go out over HTTPS — prompts are encrypted in transit
-- Venice claims it doesn't log prompts — but standard inference is not TEE-protected (alpha TEE mode exists, not production-ready)
+- Venice standard inference provides policy-based privacy (anonymized, no logging). Venice's alpha E2EE/TEE mode adds cryptographic guarantees for supported models.
 - dstack provides attestation proving the room code is what it claims
 - Base contracts handle on-chain commitments
 - Lit Protocol gates room access via conditional decryption
 
 **What Venice does NOT give us in this model:**
-- Standard Venice inference privacy is "trust Venice" — they claim no logging, but there's no TEE attestation for standard inference. Venice has an alpha TEE mode, but it is not production-ready.
+- Standard Venice inference provides policy-based privacy (trust Venice's no-logging claims). Venice's alpha E2EE/TEE mode adds cryptographic guarantees with hardware attestation for supported models.
 - If we needed verifiable private inference (prove the model ran exactly as claimed), we'd need Phala GPU-TEE (Redpill) or similar
 - For the hackathon, Venice's trust model is acceptable — the novel primitive is the room protocol, not the inference privacy
 

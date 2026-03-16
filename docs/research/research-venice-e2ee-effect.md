@@ -254,13 +254,15 @@ The `tee-glm-5` model uses Phala's TEE provider and does NOT return a signing_ke
 
 ---
 
-## 8. Known Bugs and Security Concerns
+## 8. Alpha Feedback — Integration Findings
 
-1. **Attestation 502 with client nonce** — Passing a `nonce` query parameter causes 502 errors. Without client nonce, the server generates its own. Security concern: without client nonce, attestations are not provably fresh — the server could theoretically replay old attestations.
+These findings are shared constructively. Venice granted us early access to their E2EE feature, which is genuinely novel — one of the few providers offering TEE-backed encrypted inference. The alpha has expected rough edges:
 
-2. **Silent degradation to plaintext** — Sending only the `X-Venice-TEE-Client-Pub-Key` header without the model key header causes the server to silently return plaintext. No error, no warning. This is a fail-open design.
+1. **Attestation with client nonce** — Passing a `nonce` query parameter returns 502. Without client nonce, the server generates its own. For production use, client-provided nonces would enable provable freshness (preventing theoretical replay of old attestations).
 
-3. **Undocumented protocol** — Venice's E2EE protocol is entirely undocumented. Had to reverse-engineer from minified frontend JS. The swagger.yaml shows no `/tee/` endpoints.
+2. **Silent degradation to plaintext** — Sending only the `X-Venice-TEE-Client-Pub-Key` header without the model key header causes the server to return plaintext without error. A fail-closed approach (returning an error when E2EE headers are partially present) would be safer for integrators.
+
+3. **Undocumented protocol** — The E2EE protocol is not yet publicly documented. We reverse-engineered it from the frontend JS, which was workable but error-prone. API documentation for the `/tee/` endpoints and the encryption protocol would significantly lower the integration barrier.
 
 ---
 

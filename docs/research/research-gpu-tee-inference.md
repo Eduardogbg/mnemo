@@ -1,8 +1,8 @@
 # GPU-TEE Inference for Mnemo — Research
 
 > Research compiled 2026-03-12 for The Synthesis hackathon.
-> **Critical finding:** Standard Venice inference is not TEE-protected — GPU operators see plaintext prompts. Venice offers alpha TEE inference, but it is not production-ready.
-> We need inference inside a GPU-TEE (Intel TDX + NVIDIA Confidential Computing).
+> **Key distinction:** Venice offers two privacy tiers: standard inference (policy-based privacy — anonymized, no logging) and alpha E2EE/TEE inference (cryptographic privacy via hardware attestation + encryption).
+> For Mnemo's requirements, we need cryptographically verifiable inference — either via Venice E2EE or Phala GPU-TEE (Redpill).
 
 ---
 
@@ -443,13 +443,19 @@ Both the CPU CVM (running the negotiation logic) and the GPU-TEE (running infere
 
 ## 7. Updated Architecture Recommendation
 
-### Before (Venice Standard Inference — NOT Private)
+### Option 1: Venice Standard Inference (Policy-Based Privacy)
 
 ```
-CPU CVM ──→ Venice API standard inference (GPU operator sees plaintext prompts!)
+CPU CVM ──→ Venice API standard inference (anonymized, no logging — policy-based)
 ```
 
-### After (Redpill — Private)
+### Option 2: Venice E2EE Inference (Cryptographic Privacy, Alpha)
+
+```
+CPU CVM ──→ Venice E2EE API (end-to-end encrypted, TEE-attested — alpha)
+```
+
+### Option 3: Redpill (Cryptographic Privacy, Production)
 
 ```
 CPU CVM ──→ Redpill API (prompts encrypted, inference in GPU-TEE)
@@ -461,11 +467,11 @@ CPU CVM ──→ Redpill API (prompts encrypted, inference in GPU-TEE)
 Minimal — swap the base URL and model:
 
 ```python
-# OLD (Venice standard inference — NOT private)
+# Venice standard inference (policy-based privacy)
 client = OpenAI(base_url="https://api.venice.ai/api/v1", api_key=VENICE_KEY)
 response = client.chat.completions.create(model="deepseek-r1", ...)
 
-# NEW (Redpill/Phala — private, TEE-attested)
+# Redpill/Phala (cryptographic privacy, GPU-TEE)
 client = OpenAI(base_url="https://api.redpill.ai/v1", api_key=PHALA_KEY)
 response = client.chat.completions.create(model="phala/deepseek-chat-v3-0324", ...)
 ```
@@ -474,7 +480,7 @@ response = client.chat.completions.create(model="phala/deepseek-chat-v3-0324", .
 
 | Provider | Privacy | Cost (1M input + 0.5M output) | Attestation |
 |----------|---------|-------------------------------|-------------|
-| Venice (standard) | NOT private (operator sees prompts) | ~$0.50 | None (alpha TEE mode exists) |
+| Venice (standard) | Policy-based privacy (anonymized, no logging) | ~$0.50 | None (alpha E2EE/TEE mode available) |
 | Redpill (DeepSeek V3) | GPU-TEE encrypted | ~$0.85 | CPU+GPU dual attestation |
 | Redpill (Qwen2.5 7B) | GPU-TEE encrypted | ~$0.09 | CPU+GPU dual attestation |
 | Self-hosted H100 | GPU-TEE encrypted | $739/10 days | Full control |

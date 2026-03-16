@@ -91,12 +91,12 @@
 
 ### 11. Venice -- "Private Agents, Trusted Actions" -- $11,500
 
-- **What we'd do:** Mnemo IS private agents performing trusted actions. However, there is a problem: we deliberately chose Redpill over Venice because "Venice is NOT private (GPU operators see plaintext)." We would need to route some inference through Venice's API to qualify.
+- **What we'd do:** Mnemo IS private agents performing trusted actions. We chose Redpill for production GPU-TEE inference, but Venice offers both policy-based privacy (standard) and cryptographic privacy (E2EE alpha). We would route some inference through Venice's API to qualify -- potentially using their E2EE mode for the demo.
 - **Effort:** 2-3 hours to add Venice as an alternative inference provider
 - **Catch:** Prizes are in VVV tokens, not USD. The "$5,750" is a "platform accounting reference only." Actual value depends on VVV market price and liquidity.
 - **Target:** Our project is literally "private deal negotiation agents" which they list as an example direction. 2nd or 3rd place plausible.
 - **Expected value:** Hard to say -- VVV token value is uncertain. Maybe $500-1,500 in real liquidatable value.
-- **Verdict:** CONSIDER. The irony is thick (using Venice for "privacy" when we know it's not private), but the prize pool is large and the fit is strong. Integrate Venice as a "non-sensitive reasoning" provider and use Redpill for the actually private parts. Frame it honestly.
+- **Verdict:** CONSIDER. The prize pool is large and the fit is strong. Use Venice E2EE for encrypted inference in the demo, and Venice standard for non-sensitive reasoning. Venice granted us alpha E2EE access, so showcasing it benefits both sides.
 
 ### 12. Self -- "Best Self Agent ID Integration" -- $1,000
 

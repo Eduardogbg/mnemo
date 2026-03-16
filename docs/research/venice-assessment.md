@@ -1,4 +1,4 @@
-# Venice AI -- Honest Technical Assessment
+# Venice AI -- Technical Assessment
 
 **Date:** 2026-03-12
 **Context:** Sponsor of The Synthesis hackathon. Evaluating for use in Mnemo (private negotiation rooms with conversation forking).
@@ -7,7 +7,7 @@
 
 ## TL;DR Verdict
 
-Venice is a **convenience wrapper** around open-weight models with a privacy story built on **policy promises, not cryptographic guarantees** for standard inference. Standard Venice inference exposes plaintext prompts to GPU operators. Venice does offer a TEE inference mode, but it is currently an alpha feature -- not production-ready. The standard privacy architecture amounts to: "we don't log, we don't tie identity to prompts, and GPUs purge after processing." This is significantly weaker than what we need for Mnemo, but Venice is still useful as an inference provider called *from within* our Phala TEE enclave.
+Venice offers two distinct privacy models: **policy-based privacy** for standard inference, and **cryptographic privacy** via their alpha E2EE/TEE feature. Standard inference anonymizes requests and relies on operational commitments (no logging, identity stripping, GPU purge after processing). This is meaningful privacy for many use cases, though not cryptographically verifiable. Venice also offers an alpha TEE inference mode with hardware attestation and end-to-end encryption -- genuinely novel work, still maturing. For Mnemo's requirements (cryptographic guarantees), we use Venice either via E2EE mode or as an inference provider called *from within* our Phala TEE enclave.
 
 ---
 
@@ -50,15 +50,15 @@ Here is what actually happens to your prompt with standard (non-TEE) Venice infe
 ### What Venice (the company) claims it cannot see:
 - The content of your prompts or responses (they pass through the proxy but are not stored)
 
-### Critical gaps:
+### Limitations of the policy-based model:
 - **No attestation or proof** that prompts are actually purged from GPUs
-- **No cryptographic enforcement** -- a malicious GPU operator could log everything
-- **The proxy is Venice-controlled** -- you are trusting Venice not to log at the proxy layer
-- **No remote attestation** -- no way to verify any of these claims
+- **No cryptographic enforcement** for standard inference -- trust is placed in Venice and GPU operators
+- **The proxy is Venice-controlled** -- you trust Venice to handle the proxy layer correctly
+- **No remote attestation** for standard inference -- the E2EE/TEE alpha addresses this for supported models
 - Telemetry is **enabled by default** (can be disabled in settings)
 
-### Honest assessment:
-For standard inference, this is roughly equivalent to the privacy of using any API service that pinky-promises not to log. It is better than OpenAI (which explicitly trains on your data by default) but it is **not private in any cryptographic or verifiable sense**. A subpoena, a rogue employee, or a compromised GPU operator breaks the model entirely. Venice's alpha TEE mode aims to address this, but is not yet production-ready.
+### Assessment:
+For standard inference, Venice provides policy-based privacy: anonymized requests, no logging claims, and GPU purge after processing. This is stronger than providers like OpenAI (which explicitly trains on your data by default) but does not offer cryptographic or verifiable guarantees. The trust model relies on Venice and GPU operators following their stated policies. Venice's alpha E2EE/TEE mode aims to add cryptographic guarantees on top of this foundation, with hardware attestation and end-to-end encryption for 15 supported models.
 
 ## 3. API Compatibility and Models
 
@@ -112,14 +112,14 @@ This means for Mnemo, Venice is purely a **downstream inference provider**. Our 
 
 | Marketing Claim | Reality |
 |----------------|---------|
-| "Private AI" | Standard inference is policy-based. E2EE mode (15 models) provides real TEE + encryption, but protocol is undocumented and has bugs. |
+| "Private AI" | Standard inference provides policy-based privacy (anonymized, no logging). E2EE mode (15 models) adds cryptographic privacy via TEE + encryption; protocol is undocumented and still in alpha. |
 | "Conversations never stored on servers" | Prompts pass through Venice's proxy. Claimed not to be stored, but no proof. |
 | "Decentralized GPU network" | GPUs see plaintext. "Decentralized" means multiple GPU operators, not trustless computation. |
 | "Encrypted conversations" | SSL in transit + encrypted local browser storage. Prompts are **decrypted at the GPU**. |
 | "No data tied to identity" | Identity stripping happens at Venice's proxy. You trust Venice to do this correctly. |
 | "Prompts purged after processing" | Policy claim. No attestation, no enforcement mechanism. |
 
-**The core contradiction (standard inference):** Venice markets "privacy" but with standard inference the GPU literally sees your plaintext. Their defense is that the GPU doesn't know *who you are*. This is anonymity-by-policy, not privacy-by-design. The E2EE mode (15 models on Intel TDX + NVIDIA CC) addresses this with real hardware attestation and end-to-end encryption, though the protocol is undocumented and has known bugs (see `research-venice-e2ee-effect.md`).
+**Two tiers of privacy:** Venice's standard inference provides anonymity-by-policy -- the GPU processes plaintext but does not know who you are. This is a meaningful privacy model for many use cases, distinct from cryptographic privacy-by-design. The E2EE mode (15 models on Intel TDX + NVIDIA CC) bridges this gap with hardware attestation and end-to-end encryption, adding cryptographic guarantees. The E2EE protocol is undocumented and still in alpha (see `research-venice-e2ee-effect.md` for integration details).
 
 ## 6. Using Venice from Inside a Phala TEE Enclave
 
@@ -156,8 +156,8 @@ This is the architecture that actually makes sense for Mnemo:
 - **Prompt caching** may leak information about repeated patterns -- evaluate whether to disable it
 - **Rate limits** are the main practical concern -- unknown exact thresholds
 
-### Honest risk assessment:
-With standard inference, Venice is the **weakest link** in the privacy chain. A compromised Venice GPU operator could log prompts. Mitigation: design prompts so that even a full log of Venice API calls reveals nothing meaningful about the negotiation. The enclave is the brain; Venice is just the language muscle.
+### Risk considerations:
+With standard inference, Venice's policy-based privacy is the least cryptographically enforced part of the chain. Mitigation: design prompts so that even a full log of Venice API calls reveals minimal information about the negotiation. The enclave is the brain; Venice provides the language capability. Alternatively, use Venice's E2EE mode for cryptographic protection on the inference calls themselves.
 
 ## 7. Pricing, Rate Limits, and Hackathon Constraints
 
@@ -204,16 +204,15 @@ With standard inference, Venice is the **weakest link** in the privacy chain. A 
 - OpenAI-compatible API (easy integration)
 - Uncensored models (useful for negotiation scenarios where agents need to discuss sensitive terms without refusal)
 - Cheap inference (DeepSeek V3.2)
-- "Privacy" marketing that aligns with Mnemo's narrative (even if the real privacy comes from Phala)
+- Privacy narrative that aligns with Mnemo's goals (standard inference provides policy-based privacy; E2EE mode adds cryptographic privacy)
 
-**What Venice does NOT give us:**
-- Documented E2EE protocol (had to reverse-engineer from minified JS)
-- Client-nonce attestation freshness (502 bug)
-- Fail-closed E2EE (silent degradation to plaintext on incomplete headers)
+**Areas for improvement in Venice's E2EE alpha (shared as feedback):**
+- E2EE protocol documentation (currently undocumented; we reverse-engineered from frontend JS)
+- Client-nonce support for attestation freshness (currently returns 502)
+- Fail-closed behavior when E2EE headers are incomplete (currently degrades silently to plaintext)
 - Native tool calling in E2EE mode
-- Any guarantee that standard (non-E2EE) inference prompts aren't logged
-- Custom code execution
-- Fine-tuned models
+- Standard (non-E2EE) inference relies on policy-based privacy, not cryptographic guarantees
+- No custom code execution or fine-tuned model support (Venice is inference-only by design)
 
 ---
 

@@ -505,7 +505,7 @@ parameters:
 
 **Privacy considerations for prompts sent to Venice (standard inference):**
 
-With standard Venice inference, the GPU sees plaintext prompts (Venice offers alpha TEE inference, but it is not production-ready; we use Redpill for production GPU-TEE). To minimize information leakage:
+With standard Venice inference, the GPU processes plaintext prompts under policy-based privacy (anonymized, no logging). Venice also offers alpha E2EE/TEE inference with cryptographic guarantees; for production GPU-TEE, we use Redpill. To minimize information exposure with standard inference:
 
 - Agent identities are referred to as "Agent A" and "Agent B" — no real identities.
 - The system prompt does not mention the negotiation room ID, TEE attestation details,
