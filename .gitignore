@@ -5,3 +5,4 @@ clones/
 .claude/
 *.tsbuildinfo
 dist/
+docs/conversation-log.md
