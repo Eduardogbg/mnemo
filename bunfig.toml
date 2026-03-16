@@ -1,0 +1,3 @@
+[install]
+# Use workspaces
+auto = "force"
