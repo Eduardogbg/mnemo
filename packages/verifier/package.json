@@ -1,0 +1,24 @@
+{
+  "name": "@mnemo/verifier",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^3.19.14",
+    "@effect/ai": "^0.33.2",
+    "@effect/ai-openai": "^0.37.2",
+    "@effect/platform": "^0.94.1",
+    "@mnemo/dvdefi": "workspace:*",
+    "@mnemo/harness": "workspace:*",
+    "@mnemo/verity": "workspace:*"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "typescript": "^5.7"
+  }
+}
