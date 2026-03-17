@@ -15,6 +15,7 @@
 |---|---|
 | [docs/design/harness-design.md](docs/design/harness-design.md) | **Harness architecture** — standalone TS, @effect/ai, 4 containers, hub-and-spoke |
 | [docs/design/design-bug-disclosure.md](docs/design/design-bug-disclosure.md) | Bug disclosure agent design — researcher/protocol negotiation via scoped reveals |
+| [docs/design/bug-disclosure-demo.md](docs/design/bug-disclosure-demo.md) | **Bug disclosure demo** — test corpus (DVDeFi), invariant catalog, TEE verifier tools, implementation plan |
 | [docs/idea.md](docs/idea.md) | Project concept, problem statement, demo scope |
 | [AGENT.md](AGENT.md) | Agent behavior instructions |
 
