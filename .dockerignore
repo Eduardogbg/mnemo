@@ -1,5 +1,11 @@
 node_modules
 repos/
+# But allow DVDeFi (needed for E2E tests)
+!repos/damn-vulnerable-defi/src/
+!repos/damn-vulnerable-defi/test/
+!repos/damn-vulnerable-defi/lib/
+!repos/damn-vulnerable-defi/foundry.toml
+!repos/damn-vulnerable-defi/remappings.txt
 clones/
 .env
 .env.*

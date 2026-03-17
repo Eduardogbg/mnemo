@@ -1,0 +1,43 @@
+# Mnemo E2E Test Runner
+#
+# Runs the full verification E2E tests (forge pipeline + LLM agent negotiation)
+# inside a container alongside the dstack TEE simulator.
+#
+# Build context must be the repo root (../..):
+#   docker build -f infra/dstack/Dockerfile.e2e .
+#
+# Requires:
+#   - OPENROUTER_API_KEY at runtime (for LLM-backed tests)
+#   - dstack-simulator accessible (for TEE attestation)
+
+FROM oven/bun:latest AS base
+
+# Install foundry (forge + anvil)
+RUN apt-get update && apt-get install -y curl git && rm -rf /var/lib/apt/lists/*
+RUN curl -L https://foundry.paradigm.xyz | bash
+ENV PATH="/root/.foundry/bin:${PATH}"
+RUN foundryup
+
+WORKDIR /app
+
+# Copy workspace config first for better layer caching
+COPY package.json bun.lock bunfig.toml tsconfig.json ./
+
+# Copy workspace packages
+COPY packages/ ./packages/
+
+# Install JS dependencies
+RUN bun install
+
+# Copy DVDeFi repo (exploit PoCs + patched contracts are local commits)
+# .dockerignore whitelists src/, test/, lib/, foundry.toml, remappings.txt
+COPY repos/damn-vulnerable-defi/ ./repos/damn-vulnerable-defi/
+
+# Pre-build forge artifacts so test runs are fast
+RUN cd repos/damn-vulnerable-defi && forge build
+
+# Run from verifier package dir (bun workspace resolution requires it)
+WORKDIR /app/packages/verifier
+
+# Default: run all verifier tests (hybrid + e2e)
+CMD ["bun", "test"]

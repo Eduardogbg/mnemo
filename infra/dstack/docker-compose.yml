@@ -9,6 +9,12 @@
 #   docker compose logs -f
 #   ./test-attestation.sh    # verify attestation works
 #   docker compose down
+#
+# E2E tests (forge pipeline + LLM agent negotiation):
+#   docker compose --env-file ../../.env up --build e2e
+#
+# Forge-only tests (no API key needed):
+#   docker compose --env-file ../../.env run --build e2e bun test src/__tests__/hybrid.test.ts
 
 services:
   # ── TEE Simulator ──────────────────────────────────────────
@@ -58,6 +64,27 @@ services:
     container_name: mnemo-harness
     environment:
       - VENICE_API_KEY=${VENICE_API_KEY}
+      - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
+    depends_on:
+      dstack-simulator:
+        condition: service_started
+    networks:
+      - mnemo-internal
+
+  # ── E2E Verifier Tests ───────────────────────────────────
+  # Runs the full verification E2E: forge pipeline (exploit + patch
+  # verification) + LLM-powered prover/verifier negotiation, all
+  # inside the simulated TEE environment.
+  #
+  # Usage:
+  #   docker compose --env-file ../../.env up --build e2e
+  e2e:
+    build:
+      context: ../..
+      dockerfile: infra/dstack/Dockerfile.e2e
+    container_name: mnemo-e2e
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
     depends_on:
       dstack-simulator:
