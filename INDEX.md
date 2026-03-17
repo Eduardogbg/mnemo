@@ -75,13 +75,25 @@
 | [docs/synthesis/bounty-fit-deep.md](docs/synthesis/bounty-fit-deep.md) | Deep sponsor relevance analysis — every sponsor through Mnemo's lens |
 | [docs/synthesis/sponsors.md](docs/synthesis/sponsors.md) | Partners and bounty strategy |
 
+## Packages
+
+| Path | What |
+|---|---|
+| [packages/dvdefi/](packages/dvdefi/) | **DVDeFi integration** — Foundry/Anvil services, 3 challenge definitions, forge-based verification pipeline |
+| [packages/verity/](packages/verity/) | **Verity** — typed invariant checking via voltaire-effect, 9 concrete invariants, PoC scripts |
+| [packages/verifier/](packages/verifier/) | **Verifier** — hybrid pipeline (forge + invariants), LLM verifier agent + tools, E2E tests |
+| [packages/harness/](packages/harness/) | Agent harness — room-based negotiation, provider abstraction (OpenRouter, mock) |
+| [packages/venice/](packages/venice/) | Venice E2EE client — ECDH key exchange, AES-256-GCM encryption |
+
 ## Infrastructure
 
 | Path | What |
 |---|---|
 | [infra/dstack/](infra/dstack/) | **Local dstack dev environment** — Docker Compose with tappd-simulator, attestation test script |
-| [infra/dstack/docker-compose.yml](infra/dstack/docker-compose.yml) | Simulator + runtime + agent containers |
+| [infra/dstack/docker-compose.yml](infra/dstack/docker-compose.yml) | Simulator + runtime + harness + E2E containers |
+| [infra/dstack/Dockerfile.e2e](infra/dstack/Dockerfile.e2e) | E2E test runner (bun + foundry + DVDeFi, runs alongside TEE simulator) |
 | [infra/dstack/test-attestation.sh](infra/dstack/test-attestation.sh) | Attestation verification script |
+| [docs/running-e2e-tests.md](docs/running-e2e-tests.md) | **How to run E2E tests** — local and Docker, verification guidance |
 
 ## Meta
 
