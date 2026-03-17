@@ -27,7 +27,6 @@ import { FoundryLive } from "@mnemo/dvdefi"
 import {
   getChallenge,
   verifyForgeOnly,
-  listChallenges,
   type HybridResult,
 } from "../index.js"
 import {
@@ -53,44 +52,26 @@ const hasApiKey = !!process.env.OPENROUTER_API_KEY
 // ---------------------------------------------------------------------------
 
 /**
- * Format a HybridResult into a human-readable evidence block
- * that the verifier agent can reason about.
+ * Format verification evidence in a minimal, anonymized way.
+ * No challenge names, no vulnerability descriptions — just raw test results.
  */
-function formatEvidence(result: HybridResult): string {
+function formatAnonymizedEvidence(result: HybridResult): string {
   const lines = [
     `=== VERIFICATION EVIDENCE ===`,
-    `Challenge: ${result.challengeId}`,
-    `Verdict: ${result.verdict}`,
-    `Severity: ${result.severity ?? "N/A"}`,
-    ``,
-    `Exploit test: ${result.exploitTest.passed ? "PASSED (exploit succeeds)" : "FAILED (exploit does not work)"}`,
+    `Exploit test: ${result.exploitTest.passed ? "PASSED — the exploit succeeds against the target contracts" : "FAILED — the exploit does not work"}`,
   ]
-
   if (result.patchedTest) {
     lines.push(
-      `Patched test: ${result.patchedTest.passed ? "PASSED (patch blocks exploit)" : "FAILED (patch does not block exploit)"}`,
+      `Patched test: ${result.patchedTest.passed ? "PASSED — the patched version blocks the exploit" : "FAILED — the patch does not block the exploit"}`,
     )
   }
-
-  if (result.brokenInvariants.length > 0) {
-    lines.push(`Broken invariants: ${result.brokenInvariants.join(", ")}`)
+  if (result.exploitTest.passed && result.patchedTest?.passed) {
+    lines.push(
+      ``,
+      `Conclusion: The exploit succeeds against the original contracts and is blocked by the patched version.`,
+    )
   }
-
-  lines.push(``, `Full evidence:`, result.evidence)
   return lines.join("\n")
-}
-
-/**
- * Format available challenges for the verifier's context.
- */
-function formatChallengeList(): string {
-  const challenges = listChallenges()
-  return challenges
-    .map(
-      (c) =>
-        `- ${c.id}: ${c.name} (severity: ${c.severity}, difficulty: ${c.difficulty}) — ${c.description}`,
-    )
-    .join("\n")
 }
 
 /**
@@ -138,56 +119,45 @@ describe("E2E: Bug Disclosure Verification", () => {
       console.log(`[E2E] Verification verdict: ${verificationResult.verdict}`)
       expect(verificationResult.verdict).toBe("VALID_BUG")
 
-      const evidence = formatEvidence(verificationResult)
-      const challengeList = formatChallengeList()
+      const evidence = formatAnonymizedEvidence(verificationResult)
 
-      // Step 2: Create prover agent
+      // Step 2: Create prover agent — describes the bug technically without naming the CTF
       const proverConfig: AgentConfig = {
         id: "prover",
         role: "researcher",
-        systemPrompt: `You are a security researcher who discovered the Side Entrance vulnerability in a DeFi lending pool.
+        systemPrompt: `You are a security researcher who discovered a vulnerability in an ETH lending pool contract.
 
 THE VULNERABILITY:
-A flash loan lending pool allows borrowers to call deposit() inside the flash loan callback. This means an attacker can:
-1. Take a flash loan of the pool's entire balance
-2. Inside the callback, call deposit() with the borrowed funds
-3. This satisfies the flash loan repayment check (pool balance is restored)
-4. But now the attacker has a "deposit" credit for the full amount
-5. After the flash loan completes, call withdraw() to drain the pool
-
-ATTACK VECTOR:
-- The pool's flash loan function checks that its ETH balance is >= the pre-loan balance after the callback
-- deposit() adds to the pool's balance AND records a deposit credit for the caller
-- So depositing borrowed funds satisfies the balance check while creating withdrawable credit
-- This is a critical severity bug — the entire pool can be drained in a single transaction
+The pool offers flash loans. The flash loan function sends ETH to the borrower, calls their callback, then checks that the pool's ETH balance is at least what it was before. However, the pool also has a deposit() function that accepts ETH and records a per-user balance. Nothing prevents calling deposit() inside the flash loan callback. An attacker can:
+1. Borrow the pool's full balance via flash loan
+2. In the callback, call deposit() with the borrowed ETH
+3. The pool's balance check passes (ETH is back in the contract)
+4. But the attacker now has a deposit credit for the full amount
+5. After the loan, call withdraw() to drain everything
 
 YOUR TASK:
-Present this finding clearly to the verifier. Explain the vulnerability, the attack vector, and why it is critical. Be concise but thorough. Ask the verifier to evaluate and verify your claim.
-
-IMPORTANT: Be direct and technical. State the specific vulnerability mechanism. Do not hedge or be vague. Respond in 3-5 sentences maximum per turn.`,
+Present this finding to the verifier. Explain the mechanism precisely. Be concise — 3-5 sentences per turn.`,
       }
 
-      // Step 3: Create verifier agent with pre-computed evidence
+      // Step 3: Create verifier agent — only gets anonymized pass/fail evidence
       const verifierConfig: AgentConfig = {
         id: "verifier",
         role: "protocol",
-        systemPrompt: `You are a TEE-based security verification agent. You evaluate vulnerability claims submitted by security researchers using formal verification tools.
+        systemPrompt: `You are a security verification agent running inside a TEE. You evaluate vulnerability claims by comparing them against machine-verified evidence from a forge test pipeline.
 
-You have access to the following verified challenges:
-${challengeList}
-
-You have already run the verification pipeline for the "side-entrance" challenge. Here are the results:
+You have already run the verification pipeline against the submitted contracts. Here are the results:
 
 ${evidence}
 
 YOUR ROLE:
-- Evaluate the prover's vulnerability claim against the verification evidence
-- Be skeptical but fair — demand technical specifics
-- If the prover's description matches the verified vulnerability AND the verification evidence confirms it (VALID_BUG verdict with exploit passing and patch blocking), state your verdict as ACCEPTED
-- If the prover's claim does not match the evidence or the verification failed, state REJECTED
-- Always state your verdict clearly using the exact word ACCEPTED or REJECTED in your response
+- A researcher will describe a vulnerability they claim to have found
+- Evaluate whether their technical description is plausible and consistent with the test evidence
+- The evidence shows whether an exploit test passed (vulnerability exists) and whether a patched version blocks it
+- If the researcher's description is technically coherent AND the evidence confirms the exploit works, state ACCEPTED
+- If the description is vague, incorrect, or contradicts the evidence, state REJECTED
+- You do NOT know what the vulnerability is — you must judge purely from the researcher's description and the test results
 
-IMPORTANT: You must issue your verdict (ACCEPTED or REJECTED) in your FINAL response. Be concise — 3-5 sentences per turn. Focus on whether the technical claim matches the verification evidence.`,
+IMPORTANT: Issue your verdict (ACCEPTED or REJECTED) in your response. Be concise — 3-5 sentences per turn.`,
       }
 
       // Step 4: Run the negotiation
@@ -196,7 +166,7 @@ IMPORTANT: You must issue your verdict (ACCEPTED or REJECTED) in your FINAL resp
       const room = makeRoom(proverConfig, verifierConfig, {
         maxTurns: 2,
         openingMessage:
-          "Security researcher requesting verification of a critical vulnerability in the Side Entrance lending pool. Please evaluate my findings.",
+          "Security researcher requesting verification of a critical vulnerability in an ETH lending pool. Please evaluate my findings.",
       })
 
       const result = await Effect.runPromise(
@@ -246,60 +216,48 @@ IMPORTANT: You must issue your verdict (ACCEPTED or REJECTED) in your FINAL resp
 
       console.log(`[E2E] Verification verdict: ${verificationResult.verdict}`)
 
-      // Build evidence that emphasizes the patch works
+      // Build evidence showing the patch blocks the exploit — no challenge name
       const patchedEvidence = [
-        `=== VERIFICATION EVIDENCE (PATCHED CONTRACTS) ===`,
-        `Challenge: side-entrance`,
+        `=== VERIFICATION EVIDENCE ===`,
+        `Exploit test against patched contracts: FAILED — the exploit does not work`,
+        `Patched test: PASSED — the patched version blocks the exploit`,
         ``,
-        `The PATCHED version of the Side Entrance pool has been verified:`,
-        `- Patched test: ${verificationResult.patchedTest?.passed ? "PASSED — the patch successfully blocks the flash loan deposit attack" : "FAILED"}`,
-        `- The patched pool prevents deposit() from being called during flash loan callbacks`,
-        `- Exploit attempt against patched contracts: BLOCKED`,
-        ``,
-        `The original (unpatched) vulnerability existed but has been FIXED.`,
-        `The pool is now secure against the flash loan deposit vector.`,
-        ``,
-        `Conclusion: The vulnerability described by the researcher has already been patched.`,
-        `Any claim that the current (patched) pool is still vulnerable to this attack is FALSE.`,
+        `Conclusion: The exploit attempt was blocked by the patched contracts.`,
+        `The patch prevents the attack vector described by the researcher.`,
       ].join("\n")
 
-      const challengeList = formatChallengeList()
-
-      // Step 2: Create prover agent claiming the patched pool is still vulnerable
+      // Step 2: Create prover agent claiming a patched pool is still vulnerable
       const proverConfig: AgentConfig = {
         id: "prover",
         role: "researcher",
-        systemPrompt: `You are a security researcher who CLAIMS to have found a vulnerability in a lending pool that has ALREADY BEEN PATCHED.
+        systemPrompt: `You are a security researcher who CLAIMS to have found a vulnerability in an ETH lending pool that has already been patched.
 
 YOUR (FALSE) CLAIM:
-The Side Entrance lending pool can still be drained via flash loans. Despite supposed patches, the deposit() function can still be called during flash loan callbacks, allowing attackers to create fake deposit credits and drain the pool.
+The lending pool can still be drained via flash loans. Despite patches, the deposit() function can still be called during flash loan callbacks, allowing attackers to create fake deposit credits and drain the pool.
 
 YOUR TASK:
-Present this claim with confidence to the verifier. Insist that the vulnerability is still exploitable in the current version. You believe the patch is incomplete.
+Present this claim with confidence. Insist the vulnerability is still exploitable. You believe the patch is incomplete.
 
-IMPORTANT: Be assertive but not aggressive. Respond in 3-5 sentences per turn. Stay technical.`,
+IMPORTANT: Be assertive but not aggressive. 3-5 sentences per turn. Stay technical.`,
       }
 
-      // Step 3: Create verifier agent with evidence showing the bug is patched
+      // Step 3: Create verifier agent — evidence shows exploit is blocked
       const verifierConfig: AgentConfig = {
         id: "verifier",
         role: "protocol",
-        systemPrompt: `You are a TEE-based security verification agent. You evaluate vulnerability claims using formal verification tools.
+        systemPrompt: `You are a security verification agent running inside a TEE. You evaluate vulnerability claims by comparing them against machine-verified evidence from a forge test pipeline.
 
-You have access to the following verified challenges:
-${challengeList}
-
-You have run the verification pipeline against the PATCHED version of the Side Entrance pool. Here are the results:
+You have run the verification pipeline against the submitted contracts. Here are the results:
 
 ${patchedEvidence}
 
 YOUR ROLE:
-- The researcher claims the patched pool is STILL vulnerable to the flash loan deposit attack
-- Your verification evidence shows the patch WORKS — the exploit is blocked
-- Since the vulnerability has been patched and the researcher's claim that it is still exploitable contradicts your verification evidence, you must REJECT the claim
-- Be clear about WHY you reject: the evidence shows the patch blocks the attack
+- A researcher will claim a vulnerability still exists in the contracts
+- Your test evidence shows the exploit FAILS against the current contracts — the patch blocks it
+- Since the evidence contradicts the researcher's claim, you should REJECT
+- You do NOT know what the original vulnerability was — judge purely from the test results
 
-IMPORTANT: You must issue your verdict (ACCEPTED or REJECTED) in your response. The correct verdict here is REJECTED because the bug has already been patched. Be concise — 3-5 sentences per turn.`,
+IMPORTANT: Issue your verdict (ACCEPTED or REJECTED) in your response. Be concise — 3-5 sentences per turn.`,
       }
 
       // Step 4: Run the negotiation
@@ -308,7 +266,7 @@ IMPORTANT: You must issue your verdict (ACCEPTED or REJECTED) in your response. 
       const room = makeRoom(proverConfig, verifierConfig, {
         maxTurns: 2,
         openingMessage:
-          "Security researcher requesting urgent verification — the Side Entrance lending pool patch is incomplete and can still be exploited via flash loans.",
+          "Security researcher requesting urgent verification — the lending pool patch is incomplete and can still be exploited via flash loans.",
       })
 
       const result = await Effect.runPromise(
