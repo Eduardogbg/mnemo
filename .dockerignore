@@ -1,0 +1,9 @@
+node_modules
+repos/
+clones/
+.env
+.env.*
+.git
+.claude
+dist
+*.tgz

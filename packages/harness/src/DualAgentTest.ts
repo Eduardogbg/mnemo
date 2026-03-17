@@ -443,6 +443,45 @@ const runNegotiation = Effect.gen(function* () {
 })
 
 // ---------------------------------------------------------------------------
+// TEE attestation probe (optional — runs when DSTACK_SIMULATOR_ENDPOINT is set)
+// ---------------------------------------------------------------------------
+
+async function probeTeeAttestation(): Promise<void> {
+  const endpoint = process.env.DSTACK_SIMULATOR_ENDPOINT
+  if (!endpoint) {
+    console.log("[TEE] DSTACK_SIMULATOR_ENDPOINT not set — skipping attestation probe.")
+    return
+  }
+
+  console.log(`[TEE] Probing dstack simulator at ${endpoint} ...`)
+
+  try {
+    // Fetch attestation quote with report_data = "mnemo-harness-poc"
+    // Note: Tappd.Info is not available in some simulator versions, so we
+    // go straight to TdxQuote which is the attestation primitive we need.
+    // report_data must be a hex-encoded string for the simulator
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    const quoteRes = await fetch(`${endpoint}/prpc/Tappd.TdxQuote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report_data: nonce }),
+    })
+    if (!quoteRes.ok) throw new Error(`Tappd.TdxQuote returned ${quoteRes.status}`)
+    const quote = await quoteRes.json() as { quote: string }
+    console.log(`[TEE] Tappd.TdxQuote OK — quote length: ${(quote.quote ?? "").length} chars`)
+
+    console.log("[TEE] TEE attestation from simulator: OK")
+    console.log()
+  } catch (err: any) {
+    console.warn(`[TEE] Attestation probe failed: ${err.message}`)
+    console.warn("[TEE] Continuing without TEE attestation (non-fatal).")
+    console.log()
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -456,13 +495,16 @@ console.log("Starting dual-agent negotiation demo...")
 console.log(`Using model: ${MODEL} (encrypted)`)
 console.log()
 
-Effect.runPromise(program).then(
-  () => {
-    console.log("Demo completed successfully.")
-    process.exit(0)
-  },
-  (error) => {
-    console.error("Demo failed:", error)
-    process.exit(1)
-  },
+// Probe TEE attestation first, then run negotiation
+probeTeeAttestation().then(() =>
+  Effect.runPromise(program).then(
+    () => {
+      console.log("Demo completed successfully.")
+      process.exit(0)
+    },
+    (error) => {
+      console.error("Demo failed:", error)
+      process.exit(1)
+    },
+  ),
 )

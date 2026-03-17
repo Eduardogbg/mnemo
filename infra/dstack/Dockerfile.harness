@@ -1,0 +1,24 @@
+# Mnemo Harness — POC container for running the dual-agent negotiation
+# inside a simulated TEE (Phala dstack tappd-simulator).
+#
+# Build context must be the repo root (../..):
+#   docker build -f infra/dstack/Dockerfile.harness .
+
+FROM oven/bun:latest
+
+WORKDIR /app
+
+# Copy workspace config first for better layer caching
+COPY package.json bun.lock bunfig.toml tsconfig.json ./
+
+# Copy workspace packages
+COPY packages/ ./packages/
+
+# Install dependencies
+RUN bun install
+
+# Run from harness package dir (bun workspace resolution requires it)
+WORKDIR /app/packages/harness
+
+# Default: run the dual-agent negotiation demo
+CMD ["bun", "run", "src/DualAgentTest.ts"]

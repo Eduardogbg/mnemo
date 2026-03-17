@@ -2,24 +2,47 @@
 
 Local TEE development setup using Phala's tappd-simulator. This emulates the dstack guest agent that runs inside a real Confidential VM (CVM) on Phala Cloud.
 
-## Quick Start
+## Quick Start — Simulator Only
 
 ```bash
 cd infra/dstack
 
-# Start the simulator and placeholder containers
-docker compose up -d
+# Start the simulator
+docker compose up -d dstack-simulator
 
 # Verify attestation works
 chmod +x test-attestation.sh
 ./test-attestation.sh
 
-# View runtime probe output
-docker compose logs mnemo-runtime
+# View runtime probe output (optional diagnostic)
+docker compose --profile probe up mnemo-runtime
 
 # Tear down
 docker compose down
 ```
+
+## Full Demo — Dual-Agent Negotiation in Simulated TEE
+
+Run the harness (two Venice E2EE agents negotiating) inside a container alongside the dstack simulator. This proves the full flow: harness running "in a TEE" making E2EE calls to Venice, with local attestation available.
+
+```bash
+cd infra/dstack
+
+# Build and run (needs Venice API key)
+VENICE_API_KEY=your-key-here docker compose up --build harness
+
+# Or with a .env file in infra/dstack/:
+#   echo "VENICE_API_KEY=your-key-here" > .env
+#   docker compose up --build harness
+
+# Tear down
+docker compose down
+```
+
+The harness container will:
+1. Probe the dstack simulator for TEE attestation (prints `TEE attestation from simulator: OK`)
+2. Run the dual-agent buyer/seller negotiation over Venice E2EE
+3. Print the final negotiation state and exit
 
 ## What the Simulator Provides
 
@@ -71,19 +94,22 @@ Install: `npm install @phala/dstack-sdk`
 ## Architecture
 
 ```
-docker compose up
+docker compose up --build harness
       |
       v
 +-- mnemo-internal network (bridge) -----------------------+
 |                                                           |
 |  dstack-simulator:8090    <-- TEE guest agent emulator    |
-|       ^   ^   ^                                           |
-|       |   |   |                                           |
-|  mnemo-runtime            <-- negotiation harness (stub)  |
-|  agent-a                  <-- placeholder agent            |
-|  agent-b                  <-- placeholder agent            |
+|       ^                                                   |
+|       |                                                   |
+|  harness                  <-- dual-agent negotiation      |
+|    1. probes attestation     (Buyer + Seller over         |
+|    2. runs negotiation        Venice E2EE)                |
 |                                                           |
 +-----------------------------------------------------------+
+         |
+         v (outbound HTTPS)
+   Venice E2EE API
 ```
 
 All containers share the `mnemo-internal` bridge network. In production, they would share the CVM's internal network with memory-encrypted isolation.
@@ -129,14 +155,15 @@ curl -s -X POST http://localhost:8090/prpc/Tappd.GetQuote \
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | Full local dev composition |
+| `Dockerfile.harness` | Container image for the dual-agent negotiation harness |
 | `runtime-probe.mjs` | Connectivity validation script (runs in mnemo-runtime container) |
 | `test-attestation.sh` | Host-side test script for verifying simulator endpoints |
 | `README.md` | This file |
 
 ## Next Steps
 
-- [ ] Replace `mnemo-runtime` stub with actual Mnemo harness
-- [ ] Replace `agent-a` / `agent-b` stubs with agent processes
-- [ ] Add `@phala/dstack-sdk` to harness dependencies
+- [x] Replace placeholder stubs with actual harness (`harness` service)
+- [x] Add TEE attestation probe at harness startup
+- [ ] Add `@phala/dstack-sdk` to harness dependencies (use SDK instead of raw fetch)
 - [ ] Implement attestation verification endpoint in the runtime
 - [ ] Create production `docker-compose.yml` (with `/var/run/dstack.sock` volume mount instead of HTTP simulator)

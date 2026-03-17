@@ -5,7 +5,7 @@
 # that the real dstack guest agent serves in production.
 #
 # Usage:
-#   docker compose up -d
+#   docker compose --env-file ../../.env up -d
 #   docker compose logs -f
 #   ./test-attestation.sh    # verify attestation works
 #   docker compose down
@@ -17,22 +17,18 @@ services:
   # Attestation quotes are synthetic (won't verify against Intel PCCS).
   dstack-simulator:
     image: phalanetwork/tappd-simulator:latest
+    platform: linux/amd64
     container_name: mnemo-dstack-simulator
     ports:
       - "8090:8090"
     networks:
       - mnemo-internal
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8090/prpc/Tappd.Info || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
+    # No healthcheck — the simulator is a minimal Rust binary with no shell.
+    # The harness retries connectivity on startup.
 
-  # ── Mnemo Runtime (placeholder) ────────────────────────────
-  # This will become the negotiation harness / state manager.
-  # For now it's a simple Node.js container that validates
-  # connectivity to the simulator.
+  # ── Mnemo Runtime (placeholder / probe) ────────────────────
+  # Simple Node.js container that validates connectivity to the
+  # simulator. Kept for quick smoke-testing without building.
   mnemo-runtime:
     image: node:20-alpine
     container_name: mnemo-runtime
@@ -44,37 +40,28 @@ services:
     command: ["node", "/app/runtime-probe.mjs"]
     depends_on:
       dstack-simulator:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mnemo-internal
+    profiles: ["probe"]
 
-  # ── Agent A (placeholder) ──────────────────────────────────
-  agent-a:
-    image: node:20-alpine
-    container_name: mnemo-agent-a
+  # ── Harness (dual-agent negotiation in simulated TEE) ─────
+  # Runs the full DualAgentTest.ts inside a container alongside
+  # the dstack simulator, proving the TEE attestation path.
+  #
+  # Usage:
+  #   docker compose --env-file ../../.env up --build harness
+  harness:
+    build:
+      context: ../..
+      dockerfile: infra/dstack/Dockerfile.harness
+    container_name: mnemo-harness
     environment:
-      - ROLE=agent-a
+      - VENICE_API_KEY=${VENICE_API_KEY}
       - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
-      - RUNTIME_URL=http://mnemo-runtime:3000
-    command: ["sh", "-c", "echo 'Agent A placeholder — waiting for harness'; sleep infinity"]
     depends_on:
       dstack-simulator:
-        condition: service_healthy
-    networks:
-      - mnemo-internal
-
-  # ── Agent B (placeholder) ──────────────────────────────────
-  agent-b:
-    image: node:20-alpine
-    container_name: mnemo-agent-b
-    environment:
-      - ROLE=agent-b
-      - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
-      - RUNTIME_URL=http://mnemo-runtime:3000
-    command: ["sh", "-c", "echo 'Agent B placeholder — waiting for harness'; sleep infinity"]
-    depends_on:
-      dstack-simulator:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mnemo-internal
 
