@@ -63,7 +63,6 @@ export {
   getBlock,
   getTransactionReceipt,
   waitForTransactionReceipt,
-  sendTransaction,
 } from "./EvmClient.js"
 
 export type {

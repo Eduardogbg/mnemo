@@ -43,7 +43,7 @@
  * const agent = makeAgent(config)
  * ```
  */
-import type { AgentConfig, AgentRole } from "@mnemo/harness"
+import type { AgentConfig } from "@mnemo/harness"
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -94,6 +94,6 @@ export const makeVerifierAgentConfig = (options?: {
   readonly id?: string
 }): AgentConfig => ({
   id: options?.id ?? "verifier",
-  role: "generic" as AgentRole,
+  role: "generic",
   systemPrompt: VERIFIER_SYSTEM_PROMPT,
 })

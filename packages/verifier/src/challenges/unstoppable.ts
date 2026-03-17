@@ -21,7 +21,7 @@ export const Unstoppable: HybridChallenge = {
   makeInvariantSuite: (ctx) =>
     makeUnstoppableSuite(
       ctx.addresses["vault"]!,
-      ctx.addresses["token"]!,
+      ctx.addresses["monitor"]!,
     ),
 
   dvdefi: dvdefiChallenge,

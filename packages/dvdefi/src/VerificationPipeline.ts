@@ -23,12 +23,12 @@
  * the devnet state (which persists after `forge test --fork-url`).
  */
 import { Context, Data, Effect, Layer } from "effect"
-import { Devnet, type DevnetError } from "./Devnet.js"
+import { Devnet, DevnetError } from "./Devnet.js"
 import { Foundry, type FoundryError, type ForgeTestResult } from "./Foundry.js"
 import {
   InvariantChecker,
+  InvariantCheckError,
   type InvariantCheckReport,
-  type InvariantCheckError,
 } from "./InvariantChecker.js"
 import type {
   ChallengeDefinition,
@@ -125,7 +125,7 @@ const makeVerificationPipeline = (
       const start = Date.now()
 
       // Step 1: Build
-      const buildResult = yield* foundry.build(dvdefiRoot).pipe(
+      yield* foundry.build(dvdefiRoot).pipe(
         Effect.mapError(
           (e) =>
             new VerificationError({
@@ -463,9 +463,31 @@ export const VerificationPipelineForgeOnly: Layer.Layer<
   VerificationPipeline,
   Effect.gen(function* () {
     const foundry = yield* Foundry
-    // Provide a stub devnet and checker — only verifyForgeOnly is usable
-    const stubDevnet = {} as Devnet
-    const stubChecker = {} as InvariantChecker
+    const msg = "Not available in forge-only mode. Use VerificationPipelineLive instead."
+    const devnetStub = new DevnetError({ reason: msg })
+    const checkerStub = new InvariantCheckError({ invariantId: "*", reason: msg })
+    const failDevnet = (..._: any[]) => Effect.fail(devnetStub)
+    const failChecker = (..._: any[]) => Effect.fail(checkerStub)
+    // Stub devnet and checker — only verifyForgeOnly is usable
+    const stubDevnet: Devnet = {
+      rpcUrl: "",
+      rpc: failDevnet,
+      snapshot: failDevnet,
+      revert: failDevnet,
+      getBalance: failDevnet,
+      ethCall: failDevnet,
+      getStorageAt: failDevnet,
+      getLogs: failDevnet,
+      getBlockNumber: failDevnet,
+      fundAccount: failDevnet,
+      mine: failDevnet,
+    } as unknown as Devnet
+    const stubChecker: InvariantChecker = {
+      checkAll: failChecker,
+      checkOne: failChecker,
+      snapshotPre: failChecker,
+      snapshotPost: failChecker,
+    } as unknown as InvariantChecker
     return makeVerificationPipeline(stubDevnet, foundry, stubChecker)
   }),
 )

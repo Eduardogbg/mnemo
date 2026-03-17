@@ -146,9 +146,7 @@ export const makeHandlers = (dvdefiRoot?: string) => {
           Effect.provide(FoundryLive),
           Effect.mapError(
             (e) =>
-              `Verification failed for '${challengeId}': ${
-                "reason" in e ? e.reason : "message" in e ? (e as any).message : String(e)
-              }`,
+              `Verification failed for '${challengeId}': ${"reason" in e ? e.reason : String(e)}`,
           ),
         )
 

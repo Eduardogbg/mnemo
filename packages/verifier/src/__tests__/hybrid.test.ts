@@ -6,9 +6,8 @@
  */
 import { describe, test, expect } from "bun:test"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import { FoundryLive } from "@mnemo/dvdefi"
-import { getChallenge, verifyForgeOnly } from "../index.js"
+import { getChallenge, listChallenges, verifyForgeOnly } from "../index.js"
 import * as path from "node:path"
 
 const DVDEFI_ROOT = path.resolve(
@@ -62,10 +61,9 @@ describe("Hybrid Verifier — forge-only mode", () => {
   }, 60_000)
 
   test("challenge registry lists all 3", () => {
-    const { listChallenges } = require("../index.js")
     const challenges = listChallenges()
     expect(challenges.length).toBe(3)
-    expect(challenges.map((c: any) => c.id).sort()).toEqual([
+    expect(challenges.map((c) => c.id).sort()).toEqual([
       "side-entrance",
       "truster",
       "unstoppable",

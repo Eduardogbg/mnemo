@@ -13,16 +13,13 @@
  *   7. Run forge patched test — should pass (exploit blocked)
  *   8. Produce verdict with evidence from both systems
  */
-import { Context, Data, Effect, Layer } from "effect"
+import { Data, Effect, Layer } from "effect"
 import { Devnet, Foundry, type ForgeTestResult, type FoundryError, type DevnetError, type ChallengeContext } from "@mnemo/dvdefi"
 import {
   type InvariantResult,
   type Severity,
   runSuite,
-  DevnetCheatcodes,
-  type InvariantError,
 } from "@mnemo/verity"
-import { ProviderService } from "voltaire-effect"
 import type { HybridChallenge } from "./HybridChallenge.js"
 import { verityLayerFromDevnet } from "./Bridge.js"
 
@@ -111,8 +108,13 @@ export const verifyHybrid = (
 
     const preInvariants = yield* runSuite(suite).pipe(
       Effect.provide(verityLayer),
-      Effect.catchAll((e) =>
-        Effect.succeed([] as ReadonlyArray<InvariantResult>),
+      Effect.mapError(
+        (e) =>
+          new HybridVerificationError({
+            reason: `Pre-exploit invariant check failed: ${String(e)}`,
+            phase: "pre-invariants",
+            cause: e,
+          }),
       ),
     )
 
@@ -159,8 +161,13 @@ export const verifyHybrid = (
     // Step 6: Run verity invariants (post-exploit)
     const postInvariants = yield* runSuite(suite).pipe(
       Effect.provide(verityLayer),
-      Effect.catchAll((e) =>
-        Effect.succeed([] as ReadonlyArray<InvariantResult>),
+      Effect.mapError(
+        (e) =>
+          new HybridVerificationError({
+            reason: `Post-exploit invariant check failed: ${String(e)}`,
+            phase: "post-invariants",
+            cause: e,
+          }),
       ),
     )
 

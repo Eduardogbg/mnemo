@@ -31,7 +31,6 @@ export {
   getBlock,
   getTransactionReceipt,
   waitForTransactionReceipt,
-  sendTransaction,
 } from "voltaire-effect"
 
 // Re-export types used by consumers
