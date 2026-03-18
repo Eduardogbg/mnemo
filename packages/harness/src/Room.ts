@@ -19,7 +19,7 @@ import { Provider } from "./Provider.js"
 import { State, type Message } from "./State.js"
 import { RoomError } from "./Errors.js"
 import type { Severity } from "@mnemo/verity"
-import { isValidSeverity } from "./tools.js"
+import { isValidSeverity, type ToolCall } from "./tools.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,12 +30,15 @@ export interface RoomConfig {
   readonly maxTurns: number
   /** Optional opening message to kick off the negotiation. */
   readonly openingMessage?: string
+  /** Optional callback invoked after each turn (e.g. for real-time streaming). */
+  readonly onTurn?: (turn: Turn) => void
 }
 
 export interface Turn {
   readonly turnNumber: number
   readonly agentId: string
   readonly message: string
+  readonly toolCalls: ReadonlyArray<ToolCall>
 }
 
 export type NegotiationOutcome = "ACCEPTED" | "REJECTED" | "EXHAUSTED"
@@ -146,8 +149,10 @@ export const makeRoom = (
             turnNumber: i + 1,
             agentId: currentAgent.config.id,
             message: result.response,
+            toolCalls: result.toolCalls,
           }
           turns.push(turn)
+          roomConfig.onTurn?.(turn)
 
           yield* Effect.log(
             `[Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message.slice(0, 100)}...`

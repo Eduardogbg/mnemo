@@ -1,0 +1,28 @@
+{
+  "name": "@mnemo/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "bun --hot src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^3.19.14",
+    "@effect/platform": "^0.94.1",
+    "@effect/platform-bun": "^0.59.0",
+    "@mnemo/harness": "workspace:*",
+    "@mnemo/verifier": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "bun-plugin-tailwind": "^0.1.2",
+    "bun-types": "latest",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7"
+  }
+}
