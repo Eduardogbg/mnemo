@@ -17,11 +17,14 @@ export const SideEntrance: HybridChallenge = {
     tests: dvdefiChallenge.tests,
   },
 
-  makeInvariantSuite: (ctx) =>
-    makeSideEntranceSuite(
-      ctx.addresses["pool"]!,
-      ctx.addresses["deployer"]!,
-    ),
+  makeInvariantSuite: (ctx) => {
+    const pool = ctx.addresses["pool"]
+    const deployer = ctx.addresses["deployer"]
+    if (!pool || !deployer) {
+      throw new Error(`side-entrance: missing addresses (pool=${pool}, deployer=${deployer})`)
+    }
+    return makeSideEntranceSuite(pool, deployer)
+  },
 
   dvdefi: dvdefiChallenge,
 }

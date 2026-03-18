@@ -4,7 +4,7 @@
  * Uses OpenAI function-calling format (name, description, parameters JSON schema)
  * so tools work with any OpenAI-compatible provider.
  */
-import type { Severity } from "@mnemo/verity"
+import { SEVERITIES, type Severity } from "@mnemo/verity"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,4 +120,4 @@ export const proverTools: ReadonlyArray<ToolDefinition> = [
 // ---------------------------------------------------------------------------
 
 export const isValidSeverity = (s: unknown): s is Severity =>
-  typeof s === "string" && ["critical", "high", "medium", "low"].includes(s)
+  typeof s === "string" && SEVERITIES.includes(s as Severity)

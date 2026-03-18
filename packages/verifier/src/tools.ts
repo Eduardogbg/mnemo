@@ -9,6 +9,7 @@
  * The tools wrap the existing @mnemo/verifier pipeline and are designed
  * to be composed into a Toolkit that can be passed to LanguageModel.generateText.
  */
+import { existsSync } from "node:fs"
 import { Tool, Toolkit } from "@effect/ai"
 import { Effect, Schema } from "effect"
 import { Foundry, FoundryLive } from "@mnemo/dvdefi"
@@ -118,6 +119,12 @@ export const makeHandlers = (dvdefiRoot?: string) => {
   const root =
     dvdefiRoot ??
     new URL("../../../../repos/damn-vulnerable-defi", import.meta.url).pathname
+
+  if (!existsSync(root)) {
+    throw new Error(
+      `dvdefiRoot not found: ${root}. Pass an explicit path or clone damn-vulnerable-defi to repos/.`
+    )
+  }
 
   return VerifierToolkit.of({
     list_challenges: () =>

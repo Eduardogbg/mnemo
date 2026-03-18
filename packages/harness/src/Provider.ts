@@ -190,10 +190,17 @@ const generateWithTools = (
 
       const text = choice.message.content ?? ""
       const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map(
-        (tc) => ({
-          name: tc.function.name,
-          args: JSON.parse(tc.function.arguments) as Record<string, unknown>,
-        }),
+        (tc) => {
+          let args: Record<string, unknown>
+          try {
+            args = JSON.parse(tc.function.arguments) as Record<string, unknown>
+          } catch {
+            throw new Error(
+              `Malformed tool call arguments for "${tc.function.name}": ${tc.function.arguments}`
+            )
+          }
+          return { name: tc.function.name, args }
+        },
       )
 
       return { text, toolCalls } satisfies GenerateTextResult

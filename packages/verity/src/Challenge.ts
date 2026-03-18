@@ -33,6 +33,9 @@ export type Verdict = "VALID_BUG" | "INVALID" | "TEST_ARTIFACT"
 
 export type Severity = "critical" | "high" | "medium" | "low"
 
+/** Canonical severity values — use for runtime validation instead of manual arrays. */
+export const SEVERITIES: readonly Severity[] = ["critical", "high", "medium", "low"] as const
+
 export interface VerificationResult {
   readonly challengeId: string
   readonly verdict: Verdict

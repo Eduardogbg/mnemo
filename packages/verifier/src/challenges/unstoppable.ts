@@ -17,11 +17,14 @@ export const Unstoppable: HybridChallenge = {
     tests: dvdefiChallenge.tests,
   },
 
-  makeInvariantSuite: (ctx) =>
-    makeUnstoppableSuite(
-      ctx.addresses["vault"]!,
-      ctx.addresses["monitor"]!,
-    ),
+  makeInvariantSuite: (ctx) => {
+    const vault = ctx.addresses["vault"]
+    const monitor = ctx.addresses["monitor"]
+    if (!vault || !monitor) {
+      throw new Error(`unstoppable: missing addresses (vault=${vault}, monitor=${monitor})`)
+    }
+    return makeUnstoppableSuite(vault, monitor)
+  },
 
   dvdefi: dvdefiChallenge,
 }

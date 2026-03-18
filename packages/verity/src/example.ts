@@ -143,6 +143,7 @@ const customInvariantSuite = () => {
       Effect.succeed({
         name: "always-true",
         holds: true,
+        severity: "low" as const,
         message: "This invariant always holds (placeholder)",
       }),
     ],

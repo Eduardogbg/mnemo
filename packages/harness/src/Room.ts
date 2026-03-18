@@ -150,27 +150,43 @@ export const makeRoom = (
             `[Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message.slice(0, 100)}...`
           )
 
-          // Check for tool calls — these determine the negotiation outcome
+          // Check for tool calls — these determine the negotiation outcome.
+          // Only the first outcome-determining tool call per turn is honoured;
+          // subsequent conflicting calls are logged and ignored.
           for (const tc of result.toolCalls) {
             if (tc.name === "approve_bug") {
-              // Verifier approves the bug and assigns severity
               const sev = tc.args.severity
               if (isValidSeverity(sev)) {
                 assignedSeverity = sev
+              } else {
+                yield* Effect.log(
+                  `[Room] Warning: approve_bug called with invalid severity: ${String(tc.args.severity)}`
+                )
               }
             } else if (tc.name === "reject_bug") {
-              // Verifier rejects the bug claim
-              outcome = "REJECTED"
+              if (outcome !== "EXHAUSTED") {
+                yield* Effect.log(`[Room] Warning: conflicting tool call reject_bug ignored (outcome already ${outcome})`)
+              } else {
+                outcome = "REJECTED"
+              }
             } else if (tc.name === "accept_severity") {
-              // Prover accepts the assigned severity
               const sev = tc.args.severity
-              if (isValidSeverity(sev)) {
+              if (outcome !== "EXHAUSTED") {
+                yield* Effect.log(`[Room] Warning: conflicting tool call accept_severity ignored (outcome already ${outcome})`)
+              } else if (isValidSeverity(sev)) {
                 outcome = "ACCEPTED"
                 agreedSeverity = sev
+              } else {
+                yield* Effect.log(
+                  `[Room] Warning: accept_severity called with invalid severity: ${String(tc.args.severity)}`
+                )
               }
             } else if (tc.name === "reject_severity") {
-              // Prover rejects the assigned severity — walks away
-              outcome = "REJECTED"
+              if (outcome !== "EXHAUSTED") {
+                yield* Effect.log(`[Room] Warning: conflicting tool call reject_severity ignored (outcome already ${outcome})`)
+              } else {
+                outcome = "REJECTED"
+              }
             }
           }
 

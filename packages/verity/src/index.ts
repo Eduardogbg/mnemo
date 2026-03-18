@@ -109,6 +109,7 @@ export {
   type SetupResult,
   type Verdict,
   type Severity,
+  SEVERITIES,
   type VerificationResult,
 } from "./Challenge.js"
 

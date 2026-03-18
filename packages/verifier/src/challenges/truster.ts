@@ -17,11 +17,14 @@ export const Truster: HybridChallenge = {
     tests: dvdefiChallenge.tests,
   },
 
-  makeInvariantSuite: (ctx) =>
-    makeTrusterSuite(
-      ctx.addresses["token"]!,
-      ctx.addresses["pool"]!,
-    ),
+  makeInvariantSuite: (ctx) => {
+    const token = ctx.addresses["token"]
+    const pool = ctx.addresses["pool"]
+    if (!token || !pool) {
+      throw new Error(`truster: missing addresses (token=${token}, pool=${pool})`)
+    }
+    return makeTrusterSuite(token, pool)
+  },
 
   dvdefi: dvdefiChallenge,
 }

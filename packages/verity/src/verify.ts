@@ -106,7 +106,7 @@ export const verify = (
     const brokenNames = broken.map((r) => r.name)
 
     const verdict = broken.length > 0 ? "VALID_BUG" as const : "INVALID" as const
-    const derivedSeverity = maxSeverity(postResults)
+    const derivedSeverity = maxSeverity(broken)
 
     const evidence = broken.length > 0
       ? broken
