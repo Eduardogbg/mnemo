@@ -15,7 +15,7 @@
     "@effect/platform": "^0.94.5",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
-    "effect": "^3.19.19"
+    "effect": "^3.19.14"
   },
   "devDependencies": {
     "bun-types": "latest"

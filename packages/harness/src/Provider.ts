@@ -171,15 +171,16 @@ const generateWithTools = (
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`API error ${response.status}: ${errorText}`)
+        throw new Error(`API error ${response.status}: ${errorText.slice(0, 500)}`)
       }
 
       const json = (await response.json()) as {
         choices: Array<{
+          finish_reason?: string
           message: {
             content?: string | null
             tool_calls?: Array<{
-              function: { name: string; arguments: string }
+              function?: { name: string; arguments: string }
             }>
           }
         }>
@@ -188,20 +189,31 @@ const generateWithTools = (
       const choice = json.choices[0]
       if (!choice) throw new Error("No choices in response")
 
+      if (choice.finish_reason === "length") {
+        console.warn("[Provider] Response truncated (finish_reason: length) — tool calls may be incomplete")
+      }
+
       const text = choice.message.content ?? ""
-      const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map(
-        (tc) => {
+      const toolCalls: ToolCall[] = (choice.message.tool_calls ?? [])
+        .filter((tc) => {
+          if (!tc.function) {
+            console.warn("[Provider] Skipping tool call with missing function field")
+            return false
+          }
+          return true
+        })
+        .map((tc) => {
+          const fn = tc.function!
           let args: Record<string, unknown>
           try {
-            args = JSON.parse(tc.function.arguments) as Record<string, unknown>
+            args = JSON.parse(fn.arguments) as Record<string, unknown>
           } catch {
             throw new Error(
-              `Malformed tool call arguments for "${tc.function.name}": ${tc.function.arguments}`
+              `Malformed tool call arguments for "${fn.name}": ${fn.arguments}`
             )
           }
-          return { name: tc.function.name, args }
-        },
-      )
+          return { name: fn.name, args }
+        })
 
       return { text, toolCalls } satisfies GenerateTextResult
     },

@@ -81,6 +81,9 @@ export const makeRoom = (
   agentBConfig: AgentConfig,
   roomConfig: RoomConfig
 ): RoomService => {
+  if (agentAConfig.id === agentBConfig.id) {
+    throw new RoomError({ message: `Agent IDs must be unique, both are "${agentAConfig.id}"` })
+  }
   const agentA = makeAgent(agentAConfig)
   const agentB = makeAgent(agentBConfig)
 
