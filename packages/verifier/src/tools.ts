@@ -29,7 +29,6 @@ const ChallengeSummary = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   difficulty: Schema.String,
-  severity: Schema.String,
 })
 
 const VerificationResult = Schema.Struct({
@@ -45,7 +44,6 @@ const ChallengeDetails = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   difficulty: Schema.String,
-  severity: Schema.String,
   contracts: Schema.Struct({
     vulnerable: Schema.Array(Schema.String),
     patched: Schema.Array(Schema.String),
@@ -129,7 +127,6 @@ export const makeHandlers = (dvdefiRoot?: string) => {
           name: c.name,
           description: c.description,
           difficulty: c.difficulty,
-          severity: c.severity,
         })),
       ),
 
@@ -173,7 +170,6 @@ export const makeHandlers = (dvdefiRoot?: string) => {
           name: challenge.name,
           description: challenge.description,
           difficulty: challenge.difficulty,
-          severity: challenge.severity,
           contracts: {
             vulnerable: [...challenge.forge.contracts.vulnerable],
             patched: [...challenge.forge.contracts.patched],

@@ -11,7 +11,6 @@ export const SideEntrance: HybridChallenge = {
   name: "Side Entrance",
   description: dvdefiChallenge.description,
   difficulty: "trivial",
-  severity: "critical",
 
   forge: {
     contracts: dvdefiChallenge.contracts,

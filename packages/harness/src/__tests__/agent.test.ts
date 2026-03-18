@@ -12,6 +12,7 @@ import {
   InMemoryLayer,
   mockLayer,
   OpenRouterLayer,
+  type GenerateTextResult,
 } from "../index.js"
 
 const hasApiKey = !!process.env.OPENROUTER_API_KEY
@@ -33,7 +34,7 @@ describe("Agent", () => {
 
     const { result, messages } = await Effect.runPromise(
       program.pipe(
-        Effect.provide(mockLayer(() => "Paris is the capital of France.")),
+        Effect.provide(mockLayer((): GenerateTextResult => ({ text: "Paris is the capital of France.", toolCalls: [] }))),
         Effect.provide(InMemoryLayer)
       )
     )
@@ -67,9 +68,9 @@ describe("Agent", () => {
     await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((msgs) => {
+          mockLayer((msgs): GenerateTextResult => {
             sentMessages = msgs as Array<{ role: string; content: string }>
-            return "follow-up answer"
+            return { text: "follow-up answer", toolCalls: [] }
           })
         )
       )

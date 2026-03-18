@@ -38,6 +38,7 @@ const poolBalance = (poolAddress: string) =>
     "se:pool-balance",
     poolAddress,
     (balance) => balance >= ETHER_IN_POOL,
+    "critical",
     `>= ${ETHER_IN_POOL} wei (1000 ETH)`,
   )
 
@@ -91,6 +92,7 @@ const balanceAccounting = (
     return {
       name: "se:balance-accounting",
       holds,
+      severity: "medium",
       actual: { actualBalance, creditSum },
       expected: "creditSum == actualBalance",
       message: holds
@@ -130,6 +132,7 @@ const depositorBalancePreservation = (
     return {
       name: "se:depositor-balance-preservation",
       holds,
+      severity: "critical",
       actual: balance,
       expected: `>= ${expectedMinBalance}`,
       message: holds

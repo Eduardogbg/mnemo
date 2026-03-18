@@ -11,7 +11,6 @@ export const Truster: HybridChallenge = {
   name: "Truster",
   description: dvdefiChallenge.description,
   difficulty: "low",
-  severity: "critical",
 
   forge: {
     contracts: dvdefiChallenge.contracts,

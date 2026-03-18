@@ -87,6 +87,7 @@ const sharesAssetsConsistency = (
     return {
       name: "us:shares-assets-consistency",
       holds,
+      severity: "high",
       actual: { totalAssets, totalSupply, convertedShares },
       expected: `convertToShares(${totalSupply}) == totalAssets()`,
       message: holds
@@ -113,6 +114,7 @@ const vaultNotPaused = (
     return {
       name: "us:vault-not-paused",
       holds,
+      severity: "medium",
       actual: isPaused,
       expected: false,
       message: holds ? undefined : "Vault is paused -- flash loans are disabled",
@@ -140,6 +142,7 @@ const flashLoanCallable = (
     return {
       name: "us:flash-loan-callable",
       holds,
+      severity: "high",
       actual: { consistencyHolds: consistency.holds, notPaused: paused.holds },
       expected: "consistent=true, paused=false",
       message: holds
@@ -173,6 +176,7 @@ const vaultOwnershipStable = (
     return {
       name: "us:vault-ownership-stable",
       holds,
+      severity: "low",
       actual: rawOwner,
       expected: expectedOwner,
       message: holds

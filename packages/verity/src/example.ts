@@ -85,7 +85,6 @@ const runFullVerification = (rpcUrl: string) => {
     name: "Side Entrance Lender Pool",
     difficulty: "trivial",
     description: "Flash loan + deposit() drain",
-    severity: "critical",
     setup: Effect.succeed({
       contracts: { pool: "0x..." },
       setupBlock: 1n,
@@ -127,6 +126,7 @@ const customInvariantSuite = () => {
         "pool-eth",
         poolAddr,
         (b) => b >= 1_000_000_000_000_000_000_000n, // >= 1000 ETH
+        "critical",
       ),
 
       // Built-in: ERC20 balance check
@@ -135,6 +135,7 @@ const customInvariantSuite = () => {
         tokenAddr,
         poolAddr,
         (b) => b >= 1_000_000_000_000_000_000_000_000n, // >= 1M tokens
+        "critical",
       ),
 
       // Custom: any Effect<InvariantResult, InvariantError, ProviderService>

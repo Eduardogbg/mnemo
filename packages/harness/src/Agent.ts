@@ -10,6 +10,7 @@ import { Context, Effect, Layer } from "effect"
 import { Provider } from "./Provider.js"
 import { State, type Message } from "./State.js"
 import { AgentError } from "./Errors.js"
+import type { ToolDefinition, ToolCall } from "./tools.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,11 +22,13 @@ export interface AgentConfig {
   readonly id: string
   readonly role: AgentRole
   readonly systemPrompt: string
+  readonly tools?: ReadonlyArray<ToolDefinition>
 }
 
 export interface AgentRunResult {
   readonly agentId: string
   readonly response: string
+  readonly toolCalls: ReadonlyArray<ToolCall>
 }
 
 export interface AgentService {
@@ -96,10 +99,11 @@ export const makeAgent = (config: AgentConfig): AgentService => ({
       messages.push({ role: "user", content: userMessage })
 
       // Call the LLM
-      const response = yield* provider
+      const result = yield* provider
         .generateText({
           system: config.systemPrompt,
           messages,
+          tools: config.tools,
         })
         .pipe(
           Effect.mapError(
@@ -116,14 +120,18 @@ export const makeAgent = (config: AgentConfig): AgentService => ({
           )
         )
       yield* state
-        .appendMessage(config.id, "assistant", response)
+        .appendMessage(config.id, "assistant", result.text)
         .pipe(
           Effect.mapError(
             (e) => new AgentError({ message: e.message, agentId: config.id, cause: e })
           )
         )
 
-      return { agentId: config.id, response } satisfies AgentRunResult
+      return {
+        agentId: config.id,
+        response: result.text,
+        toolCalls: result.toolCalls,
+      } satisfies AgentRunResult
     }),
 
   runWithHistory: (history, userMessage) =>
@@ -138,10 +146,11 @@ export const makeAgent = (config: AgentConfig): AgentService => ({
       )
       messages.push({ role: "user", content: userMessage })
 
-      const response = yield* provider
+      const result = yield* provider
         .generateText({
           system: config.systemPrompt,
           messages,
+          tools: config.tools,
         })
         .pipe(
           Effect.mapError(
@@ -149,7 +158,11 @@ export const makeAgent = (config: AgentConfig): AgentService => ({
           )
         )
 
-      return { agentId: config.id, response } satisfies AgentRunResult
+      return {
+        agentId: config.id,
+        response: result.text,
+        toolCalls: result.toolCalls,
+      } satisfies AgentRunResult
     }),
 })
 

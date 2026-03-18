@@ -92,6 +92,7 @@ export {
   type Invariant,
   type InvariantSuite,
   runSuite,
+  maxSeverity,
   balanceInvariant,
   tokenBalanceInvariant,
   storageInvariant,

@@ -36,7 +36,8 @@ export type Severity = "critical" | "high" | "medium" | "low"
 export interface VerificationResult {
   readonly challengeId: string
   readonly verdict: Verdict
-  readonly severity: Severity
+  /** Max severity among broken invariants, or null if none broken */
+  readonly maxBrokenSeverity: Severity | null
   /** Results from pre-exploit invariant check */
   readonly preResults: ReadonlyArray<{
     readonly name: string
@@ -72,8 +73,6 @@ export interface ChallengeDefinition {
   readonly difficulty: "trivial" | "low" | "moderate" | "hard"
   /** Short description of the vulnerability */
   readonly description: string
-  /** Severity of the bug class */
-  readonly severity: Severity
 
   /**
    * How to set up the vulnerable environment.

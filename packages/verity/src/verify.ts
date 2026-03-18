@@ -10,22 +10,11 @@
 import * as Effect from "effect/Effect"
 import { ProviderService } from "voltaire-effect"
 import { DevnetCheatcodes } from "./DevnetCheatcodes.js"
-import type { ChallengeDefinition, VerificationResult, Severity } from "./Challenge.js"
+import type { ChallengeDefinition, VerificationResult } from "./Challenge.js"
 import type { InvariantResult } from "./Invariant.js"
-import { runSuite } from "./Invariant.js"
+import { runSuite, maxSeverity } from "./Invariant.js"
 import type { PoCScript } from "./PoCScript.js"
 import { InvariantError, PoCError } from "./errors.js"
-
-// ---------------------------------------------------------------------------
-// Severity ordering for max-severity calculation
-// ---------------------------------------------------------------------------
-
-const SEVERITY_ORDER: Record<Severity, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-}
 
 // ---------------------------------------------------------------------------
 // Verification pipeline
@@ -65,7 +54,7 @@ export const verify = (
       return {
         challengeId: challenge.id,
         verdict: "INVALID" as const,
-        severity: "low" as const,
+        maxBrokenSeverity: null,
         preResults: preResults.map(toResultSummary),
         postResults: [],
         brokenInvariants: preBroken.map((r) => r.name),
@@ -117,7 +106,7 @@ export const verify = (
     const brokenNames = broken.map((r) => r.name)
 
     const verdict = broken.length > 0 ? "VALID_BUG" as const : "INVALID" as const
-    const severity: Severity = broken.length > 0 ? challenge.severity : "low"
+    const derivedSeverity = maxSeverity(postResults)
 
     const evidence = broken.length > 0
       ? broken
@@ -128,7 +117,7 @@ export const verify = (
     return {
       challengeId: challenge.id,
       verdict,
-      severity,
+      maxBrokenSeverity: derivedSeverity,
       preResults: preResults.map(toResultSummary),
       postResults: postResults.map(toResultSummary),
       brokenInvariants: brokenNames,

@@ -4,16 +4,16 @@
  *   - verity's typed Effect invariants (for RPC-level verification)
  *
  * This is the single source of truth for a challenge in the verifier.
+ * Severity is no longer hardcoded here — it's derived from broken invariants.
  */
 import type { ChallengeDefinition as DvDefiChallenge, ChallengeContext } from "@mnemo/dvdefi"
-import type { InvariantSuite, Severity } from "@mnemo/verity"
+import type { InvariantSuite } from "@mnemo/verity"
 
 export interface HybridChallenge {
   readonly id: string
   readonly name: string
   readonly description: string
   readonly difficulty: "trivial" | "low" | "moderate" | "hard"
-  readonly severity: Severity
 
   /** Forge test paths — from dvdefi */
   readonly forge: {

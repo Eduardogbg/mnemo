@@ -12,6 +12,7 @@ import {
   OpenRouterLayer,
   State,
   type AgentConfig,
+  type GenerateTextResult,
 } from "../index.js"
 
 const hasApiKey = !!process.env.OPENROUTER_API_KEY
@@ -46,9 +47,9 @@ describe("Room", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer(() => {
+          mockLayer((): GenerateTextResult => {
             callCount++
-            return `Response ${callCount}`
+            return { text: `Response ${callCount}`, toolCalls: [] }
           })
         ),
         Effect.provide(InMemoryLayer)
@@ -58,6 +59,7 @@ describe("Room", () => {
     expect(result.totalTurns).toBe(3)
     expect(result.agentA).toBe("buyer")
     expect(result.agentB).toBe("seller")
+    expect(result.outcome).toBe("EXHAUSTED")
 
     // Verify alternation: buyer, seller, buyer
     expect(result.turns[0]!.agentId).toBe("buyer")
@@ -77,7 +79,7 @@ describe("Room", () => {
 
     const result = await Effect.runPromise(
       program.pipe(
-        Effect.provide(mockLayer(() => "single turn")),
+        Effect.provide(mockLayer((): GenerateTextResult => ({ text: "single turn", toolCalls: [] }))),
         Effect.provide(InMemoryLayer)
       )
     )
@@ -104,9 +106,9 @@ describe("Room", () => {
     const { messages } = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer(() => {
+          mockLayer((): GenerateTextResult => {
             callCount++
-            return `Turn ${callCount}`
+            return { text: `Turn ${callCount}`, toolCalls: [] }
           })
         ),
         Effect.provide(InMemoryLayer)
@@ -140,6 +142,7 @@ describe("Room", () => {
       expect(result.totalTurns).toBe(3)
       expect(result.agentA).toBe("buyer")
       expect(result.agentB).toBe("seller")
+      expect(result.outcome).toBe("EXHAUSTED")
 
       // Verify alternation
       expect(result.turns[0]!.agentId).toBe("buyer")

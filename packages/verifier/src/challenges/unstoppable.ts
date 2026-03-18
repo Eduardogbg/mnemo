@@ -11,7 +11,6 @@ export const Unstoppable: HybridChallenge = {
   name: "Unstoppable",
   description: dvdefiChallenge.description,
   difficulty: "low",
-  severity: "high",
 
   forge: {
     contracts: dvdefiChallenge.contracts,

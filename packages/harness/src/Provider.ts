@@ -7,13 +7,15 @@
  * trivially replaceable with Redpill, Venice, or a test mock.
  *
  * Uses @effect/ai + @effect/ai-openai for the actual HTTP calls — no Vercel
- * AI SDK dependency.
+ * AI SDK dependency. When tools are present, uses a direct fetch to the
+ * OpenAI-compatible endpoint (bypassing @effect/ai's complex Toolkit types).
  */
 import { Context, Effect, Layer, Redacted } from "effect"
 import { LanguageModel } from "@effect/ai"
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai"
 import { FetchHttpClient } from "@effect/platform"
 import { ProviderError } from "./Errors.js"
+import type { ToolDefinition, ToolCall, GenerateTextResult } from "./tools.js"
 
 // ---------------------------------------------------------------------------
 // Service definition
@@ -29,12 +31,13 @@ export interface ProviderConfig {
 
 export interface ProviderService {
   /**
-   * Send a chat-completions request and get back the assistant's text.
+   * Send a chat-completions request and get back text + optional tool calls.
    */
   readonly generateText: (options: {
     readonly system?: string
     readonly messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>
-  }) => Effect.Effect<string, ProviderError>
+    readonly tools?: ReadonlyArray<ToolDefinition>
+  }) => Effect.Effect<GenerateTextResult, ProviderError>
 
   /** The underlying config, useful for introspection / logging. */
   readonly config: ProviderConfig
@@ -77,10 +80,14 @@ const makeEffectAiProvider = (config: ProviderConfig): ProviderService => {
 
   return {
     config,
-    generateText: ({ system, messages }) => {
+    generateText: ({ system, messages, tools }) => {
+      // When tools are present, use direct fetch to OpenAI-compatible endpoint
+      // to avoid fighting @effect/ai's complex Toolkit type system.
+      if (tools && tools.length > 0) {
+        return generateWithTools(config, system, messages, tools)
+      }
+
       // Build the prompt as a multi-part conversation.
-      // @effect/ai's LanguageModel.generateText accepts a Prompt, which can
-      // be a plain string or an array of message objects.
       const prompt: Array<{ role: "system" | "user" | "assistant"; content: string }> = []
 
       if (system) {
@@ -93,7 +100,10 @@ const makeEffectAiProvider = (config: ProviderConfig): ProviderService => {
       return LanguageModel.generateText({
         prompt,
       }).pipe(
-        Effect.map((response) => response.text),
+        Effect.map((response): GenerateTextResult => ({
+          text: response.text,
+          toolCalls: [],
+        })),
         Effect.provide(fullLayer),
         Effect.mapError((error) =>
           new ProviderError({
@@ -104,13 +114,96 @@ const makeEffectAiProvider = (config: ProviderConfig): ProviderService => {
         Effect.tapError((e) =>
           Effect.logError(`Provider error: ${e.message}`)
         ),
-        // Widen the type to remove any remaining service requirements —
-        // the layer above provides everything.
         Effect.scoped,
-      ) as Effect.Effect<string, ProviderError>
+      ) as Effect.Effect<GenerateTextResult, ProviderError>
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Direct fetch for tool-augmented calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Make a direct OpenAI-compatible API call with native tool/function definitions.
+ * Bypasses @effect/ai's Toolkit to keep the tool definition format simple.
+ */
+const generateWithTools = (
+  config: ProviderConfig,
+  system: string | undefined,
+  messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>,
+  tools: ReadonlyArray<ToolDefinition>,
+): Effect.Effect<GenerateTextResult, ProviderError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const apiMessages: Array<{ role: string; content: string }> = []
+      if (system) {
+        apiMessages.push({ role: "system", content: system })
+      }
+      for (const m of messages) {
+        apiMessages.push({ role: m.role, content: m.content })
+      }
+
+      const body = {
+        model: config.model,
+        messages: apiMessages,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: config.maxTokens ?? 1024,
+        tools: tools.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        })),
+        tool_choice: "auto",
+      }
+
+      const response = await fetch(`${config.baseURL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`API error ${response.status}: ${errorText}`)
+      }
+
+      const json = (await response.json()) as {
+        choices: Array<{
+          message: {
+            content?: string | null
+            tool_calls?: Array<{
+              function: { name: string; arguments: string }
+            }>
+          }
+        }>
+      }
+
+      const choice = json.choices[0]
+      if (!choice) throw new Error("No choices in response")
+
+      const text = choice.message.content ?? ""
+      const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map(
+        (tc) => ({
+          name: tc.function.name,
+          args: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+        }),
+      )
+
+      return { text, toolCalls } satisfies GenerateTextResult
+    },
+    catch: (error) =>
+      new ProviderError({
+        message: `Tool-augmented LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
+        cause: error,
+      }),
+  })
 
 // ---------------------------------------------------------------------------
 // Layer constructors
@@ -147,9 +240,10 @@ export const OpenRouterLayer: Layer.Layer<Provider, ProviderError> = Layer.effec
 
 /**
  * Create a mock provider layer for testing — returns a fixed response.
+ * The respond function returns a GenerateTextResult (text + toolCalls).
  */
 export const mockLayer = (
-  respond: (messages: ReadonlyArray<{ role: string; content: string }>) => string
+  respond: (messages: ReadonlyArray<{ role: string; content: string }>) => GenerateTextResult
 ): Layer.Layer<Provider> =>
   Layer.succeed(
     Provider,

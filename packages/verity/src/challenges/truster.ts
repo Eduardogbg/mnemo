@@ -42,6 +42,7 @@ const poolTokenBalance = (tokenAddress: string, poolAddress: string) =>
     tokenAddress,
     poolAddress,
     (balance) => balance >= TOKENS_IN_POOL,
+    "critical",
     `>= ${TOKENS_IN_POOL} (1,000,000 DVT)`,
   )
 
@@ -61,6 +62,7 @@ const noUnauthorizedAllowances = (
     tokenAddress,
     poolAddress,
     fromBlock,
+    "high",
   )
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ const poolAllowanceZero = (
     return {
       name: "tr:pool-allowance-zero",
       holds,
+      severity: "critical",
       actual: allowance,
       expected: "0",
       message: holds

@@ -5,7 +5,7 @@
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
-import { Provider, OpenRouterLayer, mockLayer } from "../index.js"
+import { Provider, OpenRouterLayer, mockLayer, type GenerateTextResult } from "../index.js"
 
 const hasApiKey = !!process.env.OPENROUTER_API_KEY
 
@@ -21,10 +21,10 @@ describe("Provider", () => {
     })
 
     const result = await Effect.runPromise(
-      program.pipe(Effect.provide(mockLayer(() => "mock response")))
+      program.pipe(Effect.provide(mockLayer(() => ({ text: "mock response", toolCalls: [] }))))
     )
 
-    expect(result).toBe("mock response")
+    expect(result).toEqual({ text: "mock response", toolCalls: [] })
   })
 
   test("mock provider receives messages", async () => {
@@ -47,7 +47,7 @@ describe("Provider", () => {
         Effect.provide(
           mockLayer((msgs) => {
             receivedMessages = msgs as Array<{ role: string; content: string }>
-            return "ok"
+            return { text: "ok", toolCalls: [] }
           })
         )
       )
@@ -74,11 +74,11 @@ describe("Provider", () => {
         program.pipe(Effect.provide(OpenRouterLayer))
       )
 
-      expect(result).toBeTruthy()
-      expect(typeof result).toBe("string")
-      expect(result.length).toBeGreaterThan(0)
+      expect(result.text).toBeTruthy()
+      expect(typeof result.text).toBe("string")
+      expect(result.text.length).toBeGreaterThan(0)
       // The response should mention "4" somewhere
-      expect(result).toMatch(/4/)
+      expect(result.text).toMatch(/4/)
     },
     { timeout: 30_000 }
   )

@@ -5,6 +5,11 @@
  * It does not know about the LLM provider directly — it goes through Agent,
  * which goes through Provider. This layered composition is key to testability.
  *
+ * After each turn, the room checks for tool calls:
+ *   - accept_severity → ACCEPTED outcome, severity agreed
+ *   - reject_severity → ABORTED outcome, prover walks away
+ *   - No tool calls after maxTurns → EXHAUSTED outcome
+ *
  * For now this is a simple turn loop. It will later incorporate the full
  * protocol state machine (scopes, consent, promotes) from the Quint spec.
  */
@@ -13,6 +18,8 @@ import { type AgentService, makeAgent, type AgentConfig } from "./Agent.js"
 import { Provider } from "./Provider.js"
 import { State, type Message } from "./State.js"
 import { RoomError } from "./Errors.js"
+import type { Severity } from "@mnemo/verity"
+import { isValidSeverity } from "./tools.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,11 +38,18 @@ export interface Turn {
   readonly message: string
 }
 
+export type NegotiationOutcome = "ACCEPTED" | "REJECTED" | "EXHAUSTED"
+
 export interface NegotiationResult {
   readonly turns: ReadonlyArray<Turn>
   readonly totalTurns: number
   readonly agentA: string
   readonly agentB: string
+  readonly outcome: NegotiationOutcome
+  /** Severity assigned by verifier (set on approve_bug) */
+  readonly assignedSeverity?: Severity
+  /** Severity agreed by prover (set on accept_severity) */
+  readonly agreedSeverity?: Severity
 }
 
 export interface RoomService {
@@ -83,6 +97,9 @@ export const makeRoom = (
         let currentAgent: AgentService = agentA
         let otherAgent: AgentService = agentB
         let currentMessage = opening
+        let outcome: NegotiationOutcome = "EXHAUSTED"
+        let assignedSeverity: Severity | undefined
+        let agreedSeverity: Severity | undefined
 
         for (let i = 0; i < roomConfig.maxTurns; i++) {
           // Get full history for context
@@ -133,6 +150,38 @@ export const makeRoom = (
             `[Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message.slice(0, 100)}...`
           )
 
+          // Check for tool calls — these determine the negotiation outcome
+          for (const tc of result.toolCalls) {
+            if (tc.name === "approve_bug") {
+              // Verifier approves the bug and assigns severity
+              const sev = tc.args.severity
+              if (isValidSeverity(sev)) {
+                assignedSeverity = sev
+              }
+            } else if (tc.name === "reject_bug") {
+              // Verifier rejects the bug claim
+              outcome = "REJECTED"
+            } else if (tc.name === "accept_severity") {
+              // Prover accepts the assigned severity
+              const sev = tc.args.severity
+              if (isValidSeverity(sev)) {
+                outcome = "ACCEPTED"
+                agreedSeverity = sev
+              }
+            } else if (tc.name === "reject_severity") {
+              // Prover rejects the assigned severity — walks away
+              outcome = "REJECTED"
+            }
+          }
+
+          // If a tool call resolved the outcome, stop the loop
+          if (outcome !== "EXHAUSTED") {
+            yield* Effect.log(
+              `[Room] Negotiation ended: ${outcome}${agreedSeverity ? ` (severity: ${agreedSeverity})` : ""}`
+            )
+            break
+          }
+
           // The current agent's response becomes the next agent's input
           currentMessage = result.response
 
@@ -147,6 +196,9 @@ export const makeRoom = (
           totalTurns: turns.length,
           agentA: agentAConfig.id,
           agentB: agentBConfig.id,
+          outcome,
+          assignedSeverity,
+          agreedSeverity,
         } satisfies NegotiationResult
       }),
   }

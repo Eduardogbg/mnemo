@@ -29,7 +29,8 @@ describe("Hybrid Verifier — forge-only mode", () => {
     expect(result.verdict).toBe("VALID_BUG")
     expect(result.exploitTest.passed).toBe(true)
     expect(result.patchedTest?.passed).toBe(true)
-    expect(result.severity).toBe("critical")
+    // Forge-only: no invariants run, severity is null (unknown)
+    expect(result.severity).toBeNull()
   }, 60_000)
 
   test("truster: VALID_BUG", async () => {
@@ -43,7 +44,7 @@ describe("Hybrid Verifier — forge-only mode", () => {
     expect(result.verdict).toBe("VALID_BUG")
     expect(result.exploitTest.passed).toBe(true)
     expect(result.patchedTest?.passed).toBe(true)
-    expect(result.severity).toBe("critical")
+    expect(result.severity).toBeNull()
   }, 60_000)
 
   test("unstoppable: VALID_BUG", async () => {
@@ -57,7 +58,7 @@ describe("Hybrid Verifier — forge-only mode", () => {
     expect(result.verdict).toBe("VALID_BUG")
     expect(result.exploitTest.passed).toBe(true)
     expect(result.patchedTest?.passed).toBe(true)
-    expect(result.severity).toBe("high")
+    expect(result.severity).toBeNull()
   }, 60_000)
 
   test("challenge registry lists all 3", () => {

@@ -19,6 +19,7 @@ import {
   type InvariantResult,
   type Severity,
   runSuite,
+  maxSeverity,
 } from "@mnemo/verity"
 import type { HybridChallenge } from "./HybridChallenge.js"
 import { verityLayerFromDevnet } from "./Bridge.js"
@@ -200,16 +201,19 @@ export const verifyHybrid = (
       verdict = "INVALID"
     }
 
+    // Derive severity from broken invariants
+    const derivedSeverity = verdict === "VALID_BUG" ? maxSeverity(postInvariants) : null
+
     return {
       challengeId: challenge.id,
       verdict,
-      severity: verdict === "VALID_BUG" ? challenge.severity : null,
+      severity: derivedSeverity,
       exploitTest,
       patchedTest,
       preInvariants,
       postInvariants,
       brokenInvariants: brokenNames,
-      evidence: makeEvidence(challenge, verdict, exploitTest, patchedTest, brokenNames),
+      evidence: makeEvidence(challenge, verdict, derivedSeverity, exploitTest, patchedTest, brokenNames),
       executionTimeMs: Date.now() - start,
     }
   })
@@ -277,13 +281,14 @@ export const verifyForgeOnly = (
     return {
       challengeId: challenge.id,
       verdict,
-      severity: verdict === "VALID_BUG" ? challenge.severity : null,
+      // Forge-only: no invariants run, severity unknown
+      severity: null,
       exploitTest,
       patchedTest,
       preInvariants: null,
       postInvariants: null,
       brokenInvariants: [],
-      evidence: makeEvidence(challenge, verdict, exploitTest, patchedTest, []),
+      evidence: makeEvidence(challenge, verdict, null, exploitTest, patchedTest, []),
       executionTimeMs: Date.now() - start,
     }
   })
@@ -295,6 +300,7 @@ export const verifyForgeOnly = (
 const makeEvidence = (
   challenge: HybridChallenge,
   verdict: Verdict,
+  severity: Severity | null,
   exploit: ForgeTestResult,
   patched: ForgeTestResult | null,
   brokenInvariants: ReadonlyArray<string>,
@@ -302,7 +308,7 @@ const makeEvidence = (
   const lines: string[] = [
     `Challenge: ${challenge.name} (${challenge.id})`,
     `Verdict: ${verdict}`,
-    `Severity: ${challenge.severity}`,
+    `Severity: ${severity ?? "unknown (no invariants)"}`,
     `Exploit test: ${exploit.passed ? "PASSED" : "FAILED"}`,
   ]
   if (patched) {

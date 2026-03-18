@@ -18,6 +18,7 @@ import {
 } from "./EvmClient.js"
 import { InvariantError } from "./errors.js"
 import { encodeCall, decodeUint256 } from "./abi.js"
+import type { Severity } from "./Challenge.js"
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -28,6 +29,8 @@ export interface InvariantResult {
   readonly name: string
   /** Whether the invariant holds */
   readonly holds: boolean
+  /** Severity if this invariant is broken */
+  readonly severity: Severity
   /** The measured on-chain value */
   readonly actual?: unknown
   /** What was expected */
@@ -66,6 +69,29 @@ export const runSuite = (
   Effect.forEach(suite.invariants, (inv) => inv, { concurrency: "unbounded" })
 
 // ---------------------------------------------------------------------------
+// Severity helpers
+// ---------------------------------------------------------------------------
+
+const SEVERITY_ORDER: Record<Severity, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3,
+}
+
+/**
+ * Return the maximum severity among broken invariants, or null if none broken.
+ */
+export const maxSeverity = (results: ReadonlyArray<InvariantResult>): Severity | null => {
+  const broken = results.filter((r) => !r.holds)
+  if (broken.length === 0) return null
+  return broken.reduce<Severity>((max, r) =>
+    SEVERITY_ORDER[r.severity] > SEVERITY_ORDER[max] ? r.severity : max,
+    broken[0]!.severity,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Helper constructors
 // ---------------------------------------------------------------------------
 
@@ -76,6 +102,7 @@ export const balanceInvariant = (
   name: string,
   address: string,
   predicate: (balance: bigint) => boolean,
+  severity: Severity,
   description?: string,
 ): Invariant =>
   Effect.gen(function* () {
@@ -93,6 +120,7 @@ export const balanceInvariant = (
     return {
       name,
       holds,
+      severity,
       actual: balance,
       expected: description ?? "predicate",
       message: holds ? undefined : `Balance invariant broken: ${balance} wei at ${address}`,
@@ -108,6 +136,7 @@ export const tokenBalanceInvariant = (
   tokenAddress: string,
   account: string,
   predicate: (balance: bigint) => boolean,
+  severity: Severity,
   description?: string,
 ): Invariant =>
   Effect.gen(function* () {
@@ -130,6 +159,7 @@ export const tokenBalanceInvariant = (
     return {
       name,
       holds,
+      severity,
       actual: balance,
       expected: description ?? "predicate",
       message: holds
@@ -146,6 +176,7 @@ export const storageInvariant = (
   address: string,
   slot: string,
   predicate: (value: bigint) => boolean,
+  severity: Severity,
   description?: string,
 ): Invariant =>
   Effect.gen(function* () {
@@ -167,6 +198,7 @@ export const storageInvariant = (
     return {
       name,
       holds,
+      severity,
       actual: value,
       expected: description ?? "predicate",
       message: holds
@@ -186,6 +218,7 @@ export const noApprovalInvariant = (
   tokenAddress: string,
   ownerAddress: string,
   fromBlock: `0x${string}` | "earliest",
+  severity: Severity,
 ): Invariant =>
   Effect.gen(function* () {
     const paddedOwner = `0x${ownerAddress.slice(2).padStart(64, "0")}` as `0x${string}`
@@ -211,6 +244,7 @@ export const noApprovalInvariant = (
     return {
       name,
       holds,
+      severity,
       actual: `${logs.length} Approval events from ${ownerAddress}`,
       expected: "0 Approval events",
       message: holds
@@ -229,6 +263,7 @@ export const viewCallInvariant = (
   selector: string,
   args: string[],
   predicate: (value: bigint) => boolean,
+  severity: Severity,
   description?: string,
 ): Invariant =>
   Effect.gen(function* () {
@@ -251,6 +286,7 @@ export const viewCallInvariant = (
     return {
       name,
       holds,
+      severity,
       actual: value,
       expected: description ?? "predicate",
       message: holds ? undefined : `View call invariant broken: ${name} = ${value}`,

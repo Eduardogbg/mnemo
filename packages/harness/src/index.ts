@@ -12,6 +12,16 @@ export {
   StateError,
 } from "./Errors.js"
 
+// Tools
+export {
+  type ToolDefinition,
+  type ToolCall,
+  type GenerateTextResult,
+  verifierTools,
+  proverTools,
+  isValidSeverity,
+} from "./tools.js"
+
 // Provider
 export {
   Provider,
@@ -50,4 +60,5 @@ export {
   type RoomService,
   type Turn,
   type NegotiationResult,
+  type NegotiationOutcome,
 } from "./Room.js"
