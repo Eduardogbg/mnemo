@@ -25,17 +25,24 @@ Venice is one of very few providers offering end-to-end encrypted inference with
 
 We reverse-engineered the E2EE protocol from Venice's frontend JavaScript in order to build a programmatic client. Below are the areas where documentation or behavior changes would help future integrators.
 
-### 1. Attestation: Nonce Support Returns 502
+### 1. ~~Attestation: Nonce Support Returns 502~~ FIXED
 
-**Observed:** `GET /api/v1/tee/attestation?model=<model>&nonce=<hex>` returns 502. Without the nonce parameter, attestation works and the server generates its own nonce (`nonce_source: "server"`).
+**Originally observed:** `GET /api/v1/tee/attestation?model=<model>&nonce=<hex>` returned 502.
 
-**Impact:** Without client-provided nonces, attestation freshness is not provable from the client's perspective. The server-generated nonce is bound to the attestation report, which provides some protection, but a client nonce would enable stronger freshness guarantees.
+**Update (2026-03-19):** Client nonces now work. The nonce must be exactly 32 bytes (64 hex characters). The response includes `request_nonce` matching the client's nonce, and it is bound into both the Intel TDX quote and the NVIDIA CC payload. Example:
 
-**Suggestion:** Support an optional client nonce that gets bound into the TDX `report_data` alongside the server nonce.
+```
+GET /api/v1/tee/attestation?model=e2ee-qwen-2-5-7b-p&nonce=<64-hex-chars>
+→ { "request_nonce": "<same-64-hex-chars>", "intel_quote": "...", "nvidia_payload": "..." }
+```
 
-### 2. E2EE Protocol: Undocumented
+Without a client nonce, the server still generates its own (`request_nonce` is server-random). Note: model names have changed — use `e2ee-` prefixed names (e.g., `e2ee-qwen-2-5-7b-p`, `e2ee-glm-5`). 11 E2EE models available as of March 19, 2026.
 
-**Observed:** The E2EE protocol is not documented in Venice's API reference or swagger.yaml. The `/tee/` endpoints are absent from the spec. We reverse-engineered the protocol from minified frontend JavaScript.
+### 2. E2EE Protocol: Partially Documented (was Undocumented)
+
+**Originally observed:** The E2EE protocol was not documented at all.
+
+**Update (2026-03-19):** Venice has published documentation at `docs.venice.ai/overview/guides/tee-e2ee-models`. It now covers the high-level flow (ECDH + HKDF-SHA256 + AES-256-GCM), required headers, attestation endpoint, and constraints. However, critical implementation details are still missing (see items 4-6 below). A developer cannot implement E2EE from the docs alone — our reverse-engineering remains necessary.
 
 **What we found:**
 - Per-message ephemeral ECDH key pairs (secp256k1)

@@ -62,6 +62,8 @@
 | [docs/research/research-landscape.md](docs/research/research-landscape.md) | Product landscape — smart accounts, agent wallets, standards |
 | [docs/research/ercs.md](docs/research/ercs.md) | ERC-8004, ERC-8183, EIP-7702, supporting standards |
 | [docs/research/erc-critique.md](docs/research/erc-critique.md) | Which ERCs to integrate vs name-drop vs skip |
+| [docs/research/research-onchain-privacy.md](docs/research/research-onchain-privacy.md) | **On-chain privacy** — stealth addresses (ERC-5564), TEE pool, ZK comparison for settlement |
+| [docs/research/research-phala-durability.md](docs/research/research-phala-durability.md) | **Phala CVM durability** — key derivation, failover, storage, disaster recovery |
 
 ## Hackathon
 
@@ -84,6 +86,16 @@
 | [packages/verifier/](packages/verifier/) | **Verifier** — hybrid pipeline (forge + invariants), LLM verifier agent + tools, E2E tests |
 | [packages/harness/](packages/harness/) | Agent harness — room-based negotiation, provider abstraction (OpenRouter, mock) |
 | [packages/venice/](packages/venice/) | Venice E2EE client — ECDH key exchange, AES-256-GCM encryption |
+| [packages/web/](packages/web/) | Demo frontend & API server — Effect HttpApi, Bun, React 19, real-time WebSocket |
+
+## Contracts
+
+| Path | What |
+|---|---|
+| [contracts/src/MnemoEscrow.sol](contracts/src/MnemoEscrow.sol) | **TEE-resolved escrow** — create/fund/release/refund lifecycle, blind commitment hashes, permissionless expiry |
+| [contracts/src/MnemoReputation.sol](contracts/src/MnemoReputation.sol) | **ERC-8004 reputation wrapper** — asymmetric detail (researcher gets severity, protocol gets outcome only), double-post prevention |
+| [contracts/script/Deploy.s.sol](contracts/script/Deploy.s.sol) | Deployment script for Base Sepolia |
+| [contracts/test/](contracts/test/) | 26 tests (18 escrow + 8 reputation), all passing |
 
 ## Infrastructure
 
@@ -106,6 +118,8 @@
 
 - **Inference**: Redpill API for production (GPU-TEE), OpenRouter for dev. Self-hosting not worth it at our scale.
 - **Harness**: Standalone TypeScript with @effect/ai. Pi extension rejected (can't delete nodes).
-- **Privacy**: Venice E2EE protocol reverse-engineered (15 models, Intel TDX + NVIDIA CC). Redpill for production GPU-TEE.
+- **Privacy**: Venice E2EE protocol reverse-engineered (11 models as of March 19, Intel TDX + NVIDIA CC). Client nonce bug fixed. Docs improved to ~60% but critical crypto params still undocumented. Redpill for production GPU-TEE.
+- **Settlement**: Stealth addresses (ERC-5564) for funding privacy, TEE-internal escrow logic, MnemoPool on-chain for settlement. See `research-onchain-privacy.md`.
+- **TEE durability**: Phala CVM keys are instance-independent (same compose = same key). Image upgrade = key rotation (drain first). See `research-phala-durability.md`.
 - **Caching**: Prefix caching optimization is marginal for multi-tenant ($0.02/negotiation savings). Better thesis for Apple Silicon + local agents.
 - **Model**: Quint formal spec v3 complete — 15 invariants verified across 10k traces.

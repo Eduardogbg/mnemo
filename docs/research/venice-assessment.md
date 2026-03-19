@@ -18,14 +18,15 @@ Venice offers two distinct privacy models: **policy-based privacy** for standard
 The E2EE protocol has been reverse-engineered from Venice's frontend JS (it is undocumented). It uses per-message ephemeral ECDH key pairs (secp256k1), HKDF-SHA256 with info `"ecdsa_encryption"`, and AES-256-GCM. Hardware attestation (Intel TDX + NVIDIA CC) is verifiable via the `/api/v1/tee/attestation` endpoint. See `docs/research/research-venice-e2ee-effect.md` for full protocol details.
 
 **Caveats:**
-- The E2EE protocol is entirely undocumented by Venice -- had to reverse-engineer from minified JS
-- Attestation does not support client nonces (502 bug), so freshness is not provable
-- Silent degradation to plaintext if E2EE headers are incomplete (fail-open)
+- The E2EE protocol is partially documented as of March 2026 (~60% coverage). Critical details still missing: HKDF info string `"ecdsa_encryption"`, IKM derivation (x-coordinate only), salt (undefined), GCM tag position. See `docs/venice-tee-feedback.md` for full gap analysis.
+- ~~Attestation does not support client nonces (502 bug)~~ **FIXED as of March 19, 2026** — client nonces (32 bytes / 64 hex chars) now work. The nonce is bound into both the Intel TDX quote and NVIDIA payload, enabling attestation freshness verification.
+- Silent degradation to plaintext if E2EE headers are incomplete (fail-open) — still undocumented
 - No native tool calling support in E2EE mode
+- E2EE model names have changed: now use `e2ee-` prefix (e.g., `e2ee-qwen-2-5-7b-p`, `e2ee-glm-5`). 11 E2EE models available as of March 19, 2026. No official SDK exists.
 
 They also acknowledge that homomorphic encryption (the other potential path to private inference) is "not feasible in any manner that would please a user" -- too slow and too expensive.
 
-**Bottom line:** For standard inference, Venice's privacy is policy-based. For E2EE models, Venice provides real hardware attestation and end-to-end encryption, though the protocol is undocumented and has some rough edges (nonce bug, silent plaintext degradation).
+**Bottom line:** For standard inference, Venice's privacy is policy-based. For E2EE models, Venice provides real hardware attestation and end-to-end encryption. Documentation has improved from zero to ~60% but critical crypto parameters (HKDF info, IKM derivation) remain undocumented. Our `packages/venice/` client remains the most complete programmatic E2EE implementation outside Venice's own frontend.
 
 ## 2. Actual Privacy Architecture
 
