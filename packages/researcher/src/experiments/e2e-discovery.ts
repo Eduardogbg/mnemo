@@ -1,16 +1,16 @@
 #!/usr/bin/env bun
 /**
- * e2e-discovery.ts — End-to-end test: registry -> discovery -> analysis -> disclosure -> negotiation.
+ * e2e-discovery.ts — End-to-end test: registry -> discovery -> analysis -> disclosure -> negotiation -> settlement.
  *
  * Exercises the full Mnemo flow:
  *   1. Set up local Registry + Escrow layers
  *   2. Register a protocol (side-entrance challenge) on the registry
  *   3. Agent discovers the protocol by polling the registry
  *   4. Agent analyzes the contract source via DeepSeek (OpenRouter)
- *   5. Agent evaluates findings and decides to disclose
- *   6. Agent creates a DisclosureIntent
- *   7. Negotiation room: researcher (prover) vs protocol (verifier)
- *   8. Escrow settlement based on negotiation outcome
+ *   5. Agent submits DisclosureIntent (no details, no on-chain state)
+ *   6. Protocol accepts → negotiation room opens
+ *   7. If ACCEPTED: escrow created, funded by protocol, released after TEE verification
+ *   8. Summary
  *
  * Usage:
  *   bun run packages/researcher/src/experiments/e2e-discovery.ts
@@ -132,8 +132,6 @@ Provide a detailed security audit report.`
 interface DisclosureIntent {
   readonly researcherAgentId: number
   readonly protocolId: bigint
-  readonly severity: string
-  readonly summary: string
   readonly timestamp: string
 }
 
@@ -311,15 +309,12 @@ const program = Effect.gen(function* () {
   console.log(`  Latency: ${latencyMs}ms | Response length: ${result.text.length} chars`)
   console.log()
 
-  // ── Step 5: Evaluate findings ─────────────────────────────────────────
-
-  console.log("[5/8] Evaluating findings...")
+  // ── Step 4b: Evaluate findings ────────────────────────────────────────
 
   const detection = detectVulnerability(result.text)
 
   if (detection.found) {
     console.log(`  Vulnerability detected: severity=${detection.severity}, confidence=${detection.confidence}`)
-    console.log("  Initiating disclosure...")
   } else {
     console.log("  No high-severity vulnerability detected by LLM.")
     console.log("  Skipping disclosure (agent would continue scanning).")
@@ -329,47 +324,28 @@ const program = Effect.gen(function* () {
   }
   console.log()
 
-  // ── Step 6: Create disclosure intent ──────────────────────────────────
+  // ── Step 5: Submit disclosure intent via TEE gateway ─────────────────
 
-  console.log("[6/8] Creating disclosure intent...")
+  console.log("[5/8] Submitting disclosure intent via TEE gateway...")
 
   const intent: DisclosureIntent = {
     researcherAgentId: 1,
     protocolId: protocolData.protocolId,
-    severity: detection.severity,
-    summary: result.text.slice(0, 500),
     timestamp: new Date().toISOString(),
   }
 
   console.log(`  DisclosureIntent {`)
   console.log(`    researcherAgentId: ${intent.researcherAgentId},`)
   console.log(`    protocolId: ${intent.protocolId},`)
-  console.log(`    severity: "${intent.severity}",`)
-  console.log(`    summary: "${intent.summary.slice(0, 120)}...",`)
   console.log(`    timestamp: "${intent.timestamp}"`)
   console.log(`  }`)
-
-  // Create escrow for the bounty
-  console.log()
-  console.log("  Creating escrow for bounty deposit...")
-  const commitHash = "0x" + "ab".repeat(32)
-  const { escrowId, txHash: escrowTx } = yield* escrow.create({
-    funder: protocolData.owner,
-    payee: "0x" + "R".repeat(40).replace(/R/g, "e"), // researcher address
-    amount: maxBounty,
-    deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
-    commitHash,
-  })
-  console.log(`  Escrow created: id=${escrowId}, tx=${escrowTx}`)
-
-  // Fund the escrow
-  const fundTx = yield* escrow.fund(escrowId, maxBounty)
-  console.log(`  Escrow funded: tx=${fundTx}`)
+  console.log(`  Protocol notified: "An attested agent has a finding for your contract"`)
+  console.log(`  Protocol accepts — opening negotiation room...`)
   console.log()
 
-  // ── Step 7: Negotiation room ──────────────────────────────────────────
+  // ── Step 6: Negotiation room ──────────────────────────────────────────
 
-  console.log("[7/8] Opening negotiation room...")
+  console.log("[6/8] Opening negotiation room...")
   console.log(`  Prover: researcher agent (LLM findings as context)`)
   console.log(`  Verifier: protocol agent (VERIFIER_SYSTEM_PROMPT + LLM analysis)`)
   console.log(`  Max turns: 6`)
@@ -449,33 +425,61 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
   }
   console.log()
 
-  // ── Step 8: Settle escrow based on outcome ────────────────────────────
-
-  console.log("[8/8] Settling escrow...")
-
-  let escrowAction: string
-  if (negotiation.outcome === "ACCEPTED") {
-    const releaseTx = yield* escrow.release(escrowId)
-    escrowAction = `Released (tx=${releaseTx})`
-    console.log(`  Escrow RELEASED: bounty paid to researcher`)
-    console.log(`  tx: ${releaseTx}`)
-  } else {
-    const refundTx = yield* escrow.refund(escrowId)
-    escrowAction = `Refunded (tx=${refundTx})`
-    console.log(`  Escrow REFUNDED: bounty returned to protocol`)
-    console.log(`  tx: ${refundTx}`)
-  }
-  console.log()
-
-  // ── Summary ───────────────────────────────────────────────────────────
+  // ── Step 7: Settlement — escrow only if ACCEPTED ──────────────────────
 
   const severity = negotiation.agreedSeverity ?? negotiation.assignedSeverity ?? detection.severity
-  console.log("=== SUMMARY ===")
-  console.log(`Protocol:      ${challenge.name} (id=${protocolData.protocolId})`)
-  console.log(`Vulnerability: ${detection.severity} severity (LLM confidence: ${detection.confidence})`)
-  console.log(`Negotiation:   ${negotiation.outcome} (${negotiation.totalTurns} turns)`)
-  console.log(`Severity:      ${severity} (${negotiation.agreedSeverity ? "agreed" : negotiation.assignedSeverity ? "assigned" : "LLM-detected"})`)
-  console.log(`Escrow:        ${escrowAction} (${ethBounty} ETH)`)
+
+  if (negotiation.outcome === "ACCEPTED") {
+    console.log("[7/8] Settlement: creating escrow (protocol funds)...")
+
+    const researcherAddress = "0x" + "ee".repeat(20)
+    const commitHash = "0x" + "ab".repeat(32)
+
+    // Protocol creates and funds escrow AFTER agreeing to the finding
+    const { escrowId, txHash: escrowTx } = yield* escrow.create({
+      funder: protocolData.owner,
+      payee: researcherAddress,
+      amount: maxBounty,
+      deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
+      commitHash,
+    })
+    console.log(`  Escrow created: id=${escrowId}, tx=${escrowTx}`)
+    console.log(`  Funder: ${protocolData.owner} (protocol)`)
+    console.log(`  Payee: ${researcherAddress} (researcher)`)
+
+    // Protocol deposits the bounty
+    const fundTx = yield* escrow.fund(escrowId, maxBounty)
+    console.log(`  Escrow funded: ${ethBounty} ETH, tx=${fundTx}`)
+
+    // Researcher reveals full PoC → TEE verifies → release
+    console.log(`  Researcher reveals full PoC...`)
+    console.log(`  TEE verification passed — releasing escrow...`)
+    const releaseTx = yield* escrow.release(escrowId)
+    console.log(`  Escrow released to researcher: tx=${releaseTx}`)
+    console.log()
+
+    // ── Step 8: Summary ─────────────────────────────────────────────────
+    console.log("[8/8] Done.\n")
+    console.log("=== SUMMARY ===")
+    console.log(`Discovery:    Found protocol "${challenge.name}" (id=${protocolData.protocolId}, bounty up to ${ethBounty} ETH)`)
+    console.log(`Analysis:     ${detection.severity} vulnerability found (confidence: ${detection.confidence})`)
+    console.log(`Disclosure:   Intent submitted, protocol accepted`)
+    console.log(`Negotiation:  ${negotiation.outcome} (${negotiation.totalTurns} turns), severity: ${severity}`)
+    console.log(`Settlement:   Escrow created -> funded (${ethBounty} ETH) -> released to researcher`)
+  } else {
+    console.log("[7/8] No deal reached — no escrow created.")
+    console.log(`  Outcome: ${negotiation.outcome}`)
+    console.log(`  No payment.`)
+    console.log()
+
+    console.log("[8/8] Done.\n")
+    console.log("=== SUMMARY ===")
+    console.log(`Discovery:    Found protocol "${challenge.name}" (id=${protocolData.protocolId}, bounty up to ${ethBounty} ETH)`)
+    console.log(`Analysis:     ${detection.severity} vulnerability found (confidence: ${detection.confidence})`)
+    console.log(`Disclosure:   Intent submitted, protocol accepted`)
+    console.log(`Negotiation:  ${negotiation.outcome} (${negotiation.totalTurns} turns)`)
+    console.log(`Settlement:   None — no deal reached`)
+  }
 })
 
 // ---------------------------------------------------------------------------
