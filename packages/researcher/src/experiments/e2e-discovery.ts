@@ -1,14 +1,16 @@
 #!/usr/bin/env bun
 /**
- * e2e-discovery.ts — End-to-end test: registry -> discovery -> analysis -> disclosure.
+ * e2e-discovery.ts — End-to-end test: registry -> discovery -> analysis -> disclosure -> negotiation.
  *
  * Exercises the full Mnemo flow:
  *   1. Set up local Registry + Escrow layers
  *   2. Register a protocol (side-entrance challenge) on the registry
- *   3. Agent discovers the protocol by querying the registry
+ *   3. Agent discovers the protocol by polling the registry
  *   4. Agent analyzes the contract source via DeepSeek (OpenRouter)
  *   5. Agent evaluates findings and decides to disclose
  *   6. Agent creates a DisclosureIntent
+ *   7. Negotiation room: researcher (prover) vs protocol (verifier)
+ *   8. Escrow settlement based on negotiation outcome
  *
  * Usage:
  *   bun run packages/researcher/src/experiments/e2e-discovery.ts
@@ -18,6 +20,7 @@ import {
   Provider,
   layerFromConfig,
   type ProviderConfig,
+  InMemoryLayer,
 } from "@mnemo/core"
 import {
   Registry,
@@ -26,7 +29,14 @@ import {
   EscrowLocalLayer,
   type ProtocolData,
 } from "@mnemo/chain"
-import { getChallenge, type HybridChallenge } from "@mnemo/verifier"
+import { getChallenge, VERIFIER_SYSTEM_PROMPT, type HybridChallenge } from "@mnemo/verifier"
+import {
+  makeRoom,
+  proverTools,
+  verifierTools,
+  type AgentConfig,
+  type NegotiationResult,
+} from "@mnemo/harness"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -165,6 +175,53 @@ function detectVulnerability(response: string): {
 }
 
 // ---------------------------------------------------------------------------
+// Polling-based registry discovery
+// ---------------------------------------------------------------------------
+
+/**
+ * Poll the registry for new protocols starting from `lastSeenId`.
+ *
+ * In production, this runs on a configurable interval (default 3 minutes).
+ * For the E2E demo, we register first then poll immediately — the protocol
+ * is already there so no waiting is needed.
+ *
+ * The local layer's `get` method fails with RegistryError for non-existent
+ * IDs, so we use that as the stop condition.
+ */
+const pollRegistry = (
+  registry: Effect.Effect.Success<typeof Registry>,
+  lastSeenId: number,
+) =>
+  Effect.gen(function* () {
+    const newProtocols: Array<ProtocolData & { protocolId: bigint }> = []
+    let id = lastSeenId
+
+    while (true) {
+      const result = yield* registry.get(BigInt(id)).pipe(
+        Effect.map((p) => ({ found: true as const, protocol: p })),
+        Effect.catchAll(() => Effect.succeed({ found: false as const, protocol: null })),
+      )
+
+      if (!result.found || !result.protocol) break
+
+      // A zeroed-out owner means the slot is empty (relevant for on-chain layer)
+      if (result.protocol.owner === "0x" + "0".repeat(40)) break
+
+      if (result.protocol.active) {
+        newProtocols.push({ ...result.protocol, protocolId: BigInt(id) })
+      }
+
+      id++
+    }
+
+    return { newProtocols, nextId: id }
+  })
+
+// Default poll interval: 3 minutes (180_000ms). Not used in E2E since we poll
+// immediately after registration, but exported for production use.
+const _POLL_INTERVAL_MS = 180_000
+
+// ---------------------------------------------------------------------------
 // Main program
 // ---------------------------------------------------------------------------
 
@@ -177,14 +234,14 @@ const program = Effect.gen(function* () {
 
   // ── Step 1: Set up local environment ──────────────────────────────────
 
-  console.log("[1/6] Setting up local environment...")
+  console.log("[1/8] Setting up local environment...")
   console.log("  Registry: local layer ready")
   console.log("  Escrow: local layer ready")
   console.log()
 
   // ── Step 2: Register protocol on registry ─────────────────────────────
 
-  console.log("[2/6] Registering protocol...")
+  console.log("[2/8] Registering protocol...")
 
   const challenge: HybridChallenge | undefined = getChallenge("side-entrance")
   if (!challenge) {
@@ -201,19 +258,27 @@ const program = Effect.gen(function* () {
   console.log(`  tx: ${txHash}`)
   console.log()
 
-  // ── Step 3: Agent discovers protocol ──────────────────────────────────
+  // ── Step 3: Agent discovers protocol via polling ──────────────────────
 
-  console.log("[3/6] Agent discovering protocols...")
+  console.log("[3/8] Agent polling registry for new protocols...")
 
-  const protocolData: ProtocolData = yield* registry.get(protocolId)
+  // In production, this runs on a 3-minute interval. For the E2E demo, we
+  // register first then poll immediately — the protocol is already there.
+  const lastSeenId = 0 // first run: start from 0
+  const { newProtocols, nextId } = yield* pollRegistry(registry, lastSeenId)
 
-  if (!protocolData.active) {
-    console.error("  ERROR: Protocol is not active")
+  if (newProtocols.length === 0) {
+    console.error("  ERROR: No active protocols found in registry")
     return
   }
 
+  console.log(`  Polled from ID ${lastSeenId}, scanned ${nextId - lastSeenId} slot(s): found ${newProtocols.length} new active protocol(s)`)
+  console.log(`  Next poll starts at ID ${nextId}`)
+
+  // Pick the first discovered protocol
+  const protocolData = newProtocols[0]!
+
   const ethBounty = Number(protocolData.maxBounty) / 1e18
-  console.log("  Found 1 active protocol")
   console.log(`  Protocol ${protocolData.protocolId}: "${challenge.name}", bounty up to ${ethBounty} ETH`)
   console.log(`  MetadataURI: ${protocolData.metadataURI}`)
   console.log(`  Registered at: ${new Date(Number(protocolData.registeredAt) * 1000).toISOString()}`)
@@ -221,7 +286,7 @@ const program = Effect.gen(function* () {
 
   // ── Step 4: Analyze contract ──────────────────────────────────────────
 
-  console.log("[4/6] Analyzing contract...")
+  console.log("[4/8] Analyzing contract...")
   console.log(`  Sending ${challenge.name} source to DeepSeek for audit...`)
   console.log(`  Model: ${providerConfig.model}`)
   console.log(`  Contract files: ${challenge.forge.contracts.vulnerable.join(", ")}`)
@@ -248,7 +313,7 @@ const program = Effect.gen(function* () {
 
   // ── Step 5: Evaluate findings ─────────────────────────────────────────
 
-  console.log("[5/6] Evaluating findings...")
+  console.log("[5/8] Evaluating findings...")
 
   const detection = detectVulnerability(result.text)
 
@@ -266,7 +331,7 @@ const program = Effect.gen(function* () {
 
   // ── Step 6: Create disclosure intent ──────────────────────────────────
 
-  console.log("[6/6] Creating disclosure intent...")
+  console.log("[6/8] Creating disclosure intent...")
 
   const intent: DisclosureIntent = {
     researcherAgentId: 1,
@@ -297,15 +362,120 @@ const program = Effect.gen(function* () {
   })
   console.log(`  Escrow created: id=${escrowId}, tx=${escrowTx}`)
 
+  // Fund the escrow
+  const fundTx = yield* escrow.fund(escrowId, maxBounty)
+  console.log(`  Escrow funded: tx=${fundTx}`)
   console.log()
-  console.log("=== FLOW COMPLETE ===")
+
+  // ── Step 7: Negotiation room ──────────────────────────────────────────
+
+  console.log("[7/8] Opening negotiation room...")
+  console.log(`  Prover: researcher agent (LLM findings as context)`)
+  console.log(`  Verifier: protocol agent (VERIFIER_SYSTEM_PROMPT + LLM analysis)`)
+  console.log(`  Max turns: 6`)
   console.log()
-  console.log("Summary:")
-  console.log(`  Protocol:     ${challenge.name} (id=${protocolData.protocolId})`)
-  console.log(`  Max bounty:   ${ethBounty} ETH`)
-  console.log(`  Vulnerability: ${detection.severity} severity (confidence: ${detection.confidence})`)
-  console.log(`  Escrow:       id=${escrowId}`)
-  console.log(`  Next step:    Open negotiation room for disclosure`)
+
+  // Build prover config — researcher presenting findings
+  const proverConfig: AgentConfig = {
+    id: "prover",
+    role: "researcher",
+    systemPrompt: `You are a security researcher who discovered a vulnerability in a DeFi protocol.
+
+CHALLENGE: ${challenge.name}
+DESCRIPTION: ${challenge.description}
+
+YOUR FINDINGS:
+${result.text.slice(0, 1500)}
+
+YOUR TASK:
+Present the vulnerability to the verifier. Explain the mechanism precisely and concisely.
+When the verifier assigns a severity, use the accept_severity tool to accept it, or reject_severity if you disagree.
+Be concise — 3-5 sentences per turn. Stay technical.`,
+    tools: proverTools,
+  }
+
+  // Build verifier config — protocol evaluating the claim
+  const evidence = [
+    `=== LLM ANALYSIS EVIDENCE ===`,
+    `Challenge: ${challenge.name}`,
+    `Researcher severity assessment: ${detection.severity} (confidence: ${detection.confidence})`,
+    ``,
+    `--- Researcher's analysis (truncated) ---`,
+    result.text.slice(0, 2000),
+    `--- End analysis ---`,
+  ].join("\n")
+
+  const verifierConfig: AgentConfig = {
+    id: "verifier",
+    role: "protocol",
+    systemPrompt: `${VERIFIER_SYSTEM_PROMPT}
+
+You have the following evidence from the researcher's LLM analysis:
+
+${evidence}
+
+IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue your verdict. Do not just write text — call the tool.`,
+    tools: verifierTools,
+  }
+
+  // Create and run the negotiation room
+  const room = makeRoom(proverConfig, verifierConfig, {
+    maxTurns: 6,
+    openingMessage: `Security researcher requesting verification of a vulnerability in ${challenge.name}. I have identified a ${detection.severity}-severity issue. Please evaluate my findings.`,
+    onTurn: (turn) => {
+      console.log(`  [Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message.slice(0, 150)}...`)
+      if (turn.toolCalls.length > 0) {
+        for (const tc of turn.toolCalls) {
+          console.log(`    -> tool: ${tc.name}(${JSON.stringify(tc.args)})`)
+        }
+      }
+    },
+  })
+
+  const negotiation: NegotiationResult = yield* room
+    .negotiate()
+    .pipe(
+      Effect.provide(layerFromConfig(providerConfig)),
+      Effect.provide(InMemoryLayer),
+    )
+
+  console.log()
+  console.log(`  Negotiation complete: outcome=${negotiation.outcome}, turns=${negotiation.totalTurns}`)
+  if (negotiation.agreedSeverity) {
+    console.log(`  Agreed severity: ${negotiation.agreedSeverity}`)
+  }
+  if (negotiation.assignedSeverity) {
+    console.log(`  Assigned severity: ${negotiation.assignedSeverity}`)
+  }
+  console.log()
+
+  // ── Step 8: Settle escrow based on outcome ────────────────────────────
+
+  console.log("[8/8] Settling escrow...")
+
+  let escrowAction: string
+  if (negotiation.outcome === "ACCEPTED") {
+    const releaseTx = yield* escrow.release(escrowId)
+    escrowAction = `Released (tx=${releaseTx})`
+    console.log(`  Escrow RELEASED: bounty paid to researcher`)
+    console.log(`  tx: ${releaseTx}`)
+  } else {
+    const refundTx = yield* escrow.refund(escrowId)
+    escrowAction = `Refunded (tx=${refundTx})`
+    console.log(`  Escrow REFUNDED: bounty returned to protocol`)
+    console.log(`  tx: ${refundTx}`)
+  }
+  console.log()
+
+  // ── Summary ───────────────────────────────────────────────────────────
+
+  const severity = negotiation.agreedSeverity ?? negotiation.assignedSeverity ?? detection.severity
+  console.log("=== SUMMARY ===")
+  console.log(`Protocol:      ${challenge.name} (id=${protocolData.protocolId})`)
+  console.log(`Vulnerability: ${detection.severity} severity (LLM confidence: ${detection.confidence})`)
+  console.log(`Negotiation:   ${negotiation.outcome} (${negotiation.totalTurns} turns)`)
+  console.log(`Severity:      ${severity} (${negotiation.agreedSeverity ? "agreed" : negotiation.assignedSeverity ? "assigned" : "LLM-detected"})`)
+  console.log(`Escrow:        ${escrowAction} (${ethBounty} ETH)`)
 })
 
 // ---------------------------------------------------------------------------

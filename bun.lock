@@ -68,6 +68,7 @@
         "@mnemo/chain": "workspace:*",
         "@mnemo/core": "workspace:*",
         "@mnemo/harness": "workspace:*",
+        "@mnemo/verifier": "workspace:*",
         "@mnemo/verity": "workspace:*",
         "effect": "^3.19.14",
       },

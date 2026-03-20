@@ -14,7 +14,8 @@
     "@mnemo/core": "workspace:*",
     "@mnemo/harness": "workspace:*",
     "@mnemo/chain": "workspace:*",
-    "@mnemo/verity": "workspace:*"
+    "@mnemo/verity": "workspace:*",
+    "@mnemo/verifier": "workspace:*"
   },
   "devDependencies": {
     "bun-types": "latest",
