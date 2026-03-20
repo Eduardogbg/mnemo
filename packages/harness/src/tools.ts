@@ -1,34 +1,9 @@
 /**
- * Tool definitions for structured tool-calling in negotiation rooms.
- *
- * Uses OpenAI function-calling format (name, description, parameters JSON schema)
- * so tools work with any OpenAI-compatible provider.
+ * Negotiation tool definitions — verifier and prover tools.
  */
-import { SEVERITIES, type Severity } from "@mnemo/verity"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface ToolDefinition {
-  readonly name: string
-  readonly description: string
-  readonly parameters: Record<string, unknown>
-}
-
-export interface ToolCall {
-  readonly name: string
-  readonly args: Record<string, unknown>
-}
-
-export interface GenerateTextResult {
-  readonly text: string
-  readonly toolCalls: ReadonlyArray<ToolCall>
-}
-
-// ---------------------------------------------------------------------------
-// Verifier tools — approve or reject the bug claim
-// ---------------------------------------------------------------------------
+import type { ToolDefinition } from "@mnemo/core"
+export type { ToolDefinition, ToolCall, GenerateTextResult } from "@mnemo/core"
+export { isValidSeverity } from "@mnemo/core"
 
 export const verifierTools: ReadonlyArray<ToolDefinition> = [
   {
@@ -70,10 +45,6 @@ export const verifierTools: ReadonlyArray<ToolDefinition> = [
   },
 ] as const
 
-// ---------------------------------------------------------------------------
-// Prover tools — accept or reject the assigned severity
-// ---------------------------------------------------------------------------
-
 export const proverTools: ReadonlyArray<ToolDefinition> = [
   {
     name: "accept_severity",
@@ -114,10 +85,3 @@ export const proverTools: ReadonlyArray<ToolDefinition> = [
     },
   },
 ] as const
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-export const isValidSeverity = (s: unknown): s is Severity =>
-  typeof s === "string" && SEVERITIES.includes(s as Severity)

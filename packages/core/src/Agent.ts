@@ -61,7 +61,7 @@ export interface AgentService {
 // Service tag
 // ---------------------------------------------------------------------------
 
-export class Agent extends Context.Tag("@mnemo/harness/Agent")<
+export class Agent extends Context.Tag("@mnemo/core/Agent")<
   Agent,
   AgentService
 >() {}

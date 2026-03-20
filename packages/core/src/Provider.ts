@@ -2,18 +2,15 @@
  * LLM Provider layer — swappable inference backend.
  *
  * Defines a `Provider` Effect service that wraps an OpenAI-compatible chat
- * completions API. The default implementation targets OpenRouter via
- * @effect/ai-openai (which speaks the OpenAI wire protocol). The layer is
- * trivially replaceable with Redpill, Venice, or a test mock.
+ * completions API (/chat/completions). Uses direct fetch for maximum
+ * compatibility with OpenRouter, Redpill, and other OpenAI-compatible
+ * providers.
  *
- * Uses @effect/ai + @effect/ai-openai for the actual HTTP calls — no Vercel
- * AI SDK dependency. When tools are present, uses a direct fetch to the
- * OpenAI-compatible endpoint (bypassing @effect/ai's complex Toolkit types).
+ * Note: @effect/ai-openai v0.37+ uses OpenAI's Responses API (/responses)
+ * which is NOT supported by OpenRouter or other third-party providers.
+ * We use direct fetch to /chat/completions instead.
  */
 import { Context, Effect, Layer, Redacted } from "effect"
-import { LanguageModel } from "@effect/ai"
-import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai"
-import { FetchHttpClient } from "@effect/platform"
 import { ProviderError } from "./Errors.js"
 import type { ToolDefinition, ToolCall, GenerateTextResult } from "./tools.js"
 
@@ -43,96 +40,40 @@ export interface ProviderService {
   readonly config: ProviderConfig
 }
 
-export class Provider extends Context.Tag("@mnemo/harness/Provider")<
+export class Provider extends Context.Tag("@mnemo/core/Provider")<
   Provider,
   ProviderService
 >() {}
 
 // ---------------------------------------------------------------------------
-// @effect/ai-openai implementation
+// Chat Completions implementation
 // ---------------------------------------------------------------------------
 
 /**
- * Build a ProviderService that delegates to @effect/ai's LanguageModel,
- * backed by the OpenAI-compatible provider from @effect/ai-openai.
+ * Build a ProviderService using direct fetch to /chat/completions.
+ *
+ * Uses the standard OpenAI Chat Completions API which is supported by
+ * all OpenAI-compatible providers (OpenRouter, Redpill, etc.).
  */
-const makeEffectAiProvider = (config: ProviderConfig): ProviderService => {
-  // Build the composed layer that provides LanguageModel.LanguageModel:
-  //   BunHttpClient -> OpenAiClient -> OpenAiLanguageModel
-  const clientLayer = OpenAiClient.layer({
-    apiKey: config.apiKey,
-    apiUrl: config.baseURL,
-  })
-
-  const modelLayer = OpenAiLanguageModel.layer({
-    model: config.model,
-    config: {
-      temperature: config.temperature ?? 0.7,
-      max_output_tokens: config.maxTokens ?? 1024,
-    },
-  })
-
-  // Full layer: HttpClient (Bun) -> OpenAiClient -> LanguageModel
-  const fullLayer = modelLayer.pipe(
-    Layer.provide(clientLayer),
-    Layer.provide(FetchHttpClient.layer),
-  )
-
-  return {
-    config,
-    generateText: ({ system, messages, tools }) => {
-      // When tools are present, use direct fetch to OpenAI-compatible endpoint
-      // to avoid fighting @effect/ai's complex Toolkit type system.
-      if (tools && tools.length > 0) {
-        return generateWithTools(config, system, messages, tools)
-      }
-
-      // Build the prompt as a multi-part conversation.
-      const prompt: Array<{ role: "system" | "user" | "assistant"; content: string }> = []
-
-      if (system) {
-        prompt.push({ role: "system", content: system })
-      }
-      for (const m of messages) {
-        prompt.push({ role: m.role, content: m.content })
-      }
-
-      return LanguageModel.generateText({
-        prompt,
-      }).pipe(
-        Effect.map((response): GenerateTextResult => ({
-          text: response.text,
-          toolCalls: [],
-        })),
-        Effect.provide(fullLayer),
-        Effect.mapError((error) =>
-          new ProviderError({
-            message: `LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
-            cause: error,
-          })
-        ),
-        Effect.tapError((e) =>
-          Effect.logError(`Provider error: ${e.message}`)
-        ),
-        Effect.scoped,
-      ) as Effect.Effect<GenerateTextResult, ProviderError>
-    },
-  }
-}
+const makeChatCompletionsProvider = (config: ProviderConfig): ProviderService => ({
+  config,
+  generateText: ({ system, messages, tools }) =>
+    chatCompletions(config, system, messages, tools),
+})
 
 // ---------------------------------------------------------------------------
-// Direct fetch for tool-augmented calls
+// Direct fetch to /chat/completions
 // ---------------------------------------------------------------------------
 
 /**
- * Make a direct OpenAI-compatible API call with native tool/function definitions.
- * Bypasses @effect/ai's Toolkit to keep the tool definition format simple.
+ * Make a direct OpenAI-compatible chat completions API call.
+ * Supports optional tool/function definitions.
  */
-const generateWithTools = (
+const chatCompletions = (
   config: ProviderConfig,
   system: string | undefined,
   messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>,
-  tools: ReadonlyArray<ToolDefinition>,
+  tools?: ReadonlyArray<ToolDefinition>,
 ): Effect.Effect<GenerateTextResult, ProviderError> =>
   Effect.tryPromise({
     try: async () => {
@@ -144,20 +85,23 @@ const generateWithTools = (
         apiMessages.push({ role: m.role, content: m.content })
       }
 
-      const body = {
+      const body: Record<string, unknown> = {
         model: config.model,
         messages: apiMessages,
         temperature: config.temperature ?? 0.7,
         max_tokens: config.maxTokens ?? 1024,
-        tools: tools.map((t) => ({
+      }
+
+      if (tools && tools.length > 0) {
+        body.tools = tools.map((t) => ({
           type: "function" as const,
           function: {
             name: t.name,
             description: t.description,
             parameters: t.parameters,
           },
-        })),
-        tool_choice: "auto",
+        }))
+        body.tool_choice = "auto"
       }
 
       const response = await fetch(`${config.baseURL}/chat/completions`, {
@@ -219,7 +163,7 @@ const generateWithTools = (
     },
     catch: (error) =>
       new ProviderError({
-        message: `Tool-augmented LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
+        message: `LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
         cause: error,
       }),
   })
@@ -232,7 +176,7 @@ const generateWithTools = (
  * Create an OpenRouter provider layer from explicit config.
  */
 export const layerFromConfig = (config: ProviderConfig): Layer.Layer<Provider> =>
-  Layer.succeed(Provider, makeEffectAiProvider(config))
+  Layer.succeed(Provider, makeChatCompletionsProvider(config))
 
 /**
  * Create an OpenRouter provider layer reading OPENROUTER_API_KEY from env.
@@ -247,7 +191,7 @@ export const OpenRouterLayer: Layer.Layer<Provider, ProviderError> = Layer.effec
         new ProviderError({ message: "OPENROUTER_API_KEY not set in environment" })
       )
     }
-    return makeEffectAiProvider({
+    return makeChatCompletionsProvider({
       apiKey: Redacted.make(apiKey),
       baseURL: "https://openrouter.ai/api/v1",
       model: "deepseek/deepseek-chat",

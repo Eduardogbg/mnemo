@@ -49,7 +49,7 @@ export interface StateService {
 // Service tag
 // ---------------------------------------------------------------------------
 
-export class State extends Context.Tag("@mnemo/harness/State")<
+export class State extends Context.Tag("@mnemo/core/State")<
   State,
   StateService
 >() {}

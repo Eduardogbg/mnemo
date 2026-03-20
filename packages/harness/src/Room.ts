@@ -14,9 +14,9 @@
  * protocol state machine (scopes, consent, promotes) from the Quint spec.
  */
 import { Context, Effect, Layer } from "effect"
-import { type AgentService, makeAgent, type AgentConfig } from "./Agent.js"
-import { Provider } from "./Provider.js"
-import { State, type Message } from "./State.js"
+import { type AgentService, makeAgent, type AgentConfig } from "@mnemo/core"
+import { Provider } from "@mnemo/core"
+import { State, type Message } from "@mnemo/core"
 import { RoomError } from "./Errors.js"
 import type { Severity } from "@mnemo/verity"
 import { isValidSeverity, type ToolCall } from "./tools.js"

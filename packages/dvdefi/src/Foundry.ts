@@ -39,6 +39,13 @@ export interface ForgeBuildResult {
   readonly stderr: string
 }
 
+export interface ForgeScriptResult {
+  readonly passed: boolean
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number
+}
+
 export interface ContractArtifact {
   readonly abi: readonly unknown[]
   readonly bytecode: { readonly object: string }
@@ -64,6 +71,16 @@ export interface Foundry {
     testMatch?: string,
     testFunction?: string,
   ) => Effect.Effect<ForgeTestResult, FoundryError>
+
+  /**
+   * Run a forge script with broadcasting.
+   */
+  readonly script: (
+    projectRoot: string,
+    scriptPath: string,
+    rpcUrl: string,
+    privateKey: string,
+  ) => Effect.Effect<ForgeScriptResult, FoundryError>
 
   /**
    * Read a compiled artifact (ABI + bytecode) from the `out/` dir.
@@ -144,6 +161,20 @@ const makeFoundry = (): Foundry => ({
         args.push("--match-test", testFunction)
       }
       const result = yield* runCommand(args, projectRoot)
+      return {
+        passed: result.exitCode === 0,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+      }
+    }),
+
+  script: (projectRoot, scriptPath, rpcUrl, privateKey) =>
+    Effect.gen(function* () {
+      const result = yield* runCommand(
+        ["forge", "script", scriptPath, "--rpc-url", rpcUrl, "--broadcast", "--private-key", privateKey],
+        projectRoot,
+      )
       return {
         passed: result.exitCode === 0,
         stdout: result.stdout,

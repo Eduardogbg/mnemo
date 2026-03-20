@@ -1,57 +1,45 @@
 /**
- * @mnemo/harness — Core agent harness for Mnemo negotiation rooms.
+ * @mnemo/harness — Negotiation room for Mnemo.
  *
- * Re-exports all public modules.
+ * Re-exports @mnemo/core for convenience.
  */
 
-// Errors
+// Re-export all of @mnemo/core for downstream convenience
 export {
   ProviderError,
   AgentError,
-  RoomError,
   StateError,
-} from "./Errors.js"
-
-// Tools
-export {
   type ToolDefinition,
   type ToolCall,
   type GenerateTextResult,
-  verifierTools,
-  proverTools,
   isValidSeverity,
-} from "./tools.js"
-
-// Provider
-export {
   Provider,
   OpenRouterLayer,
   layerFromConfig,
   mockLayer,
   type ProviderConfig,
   type ProviderService,
-} from "./Provider.js"
-
-// State
-export {
   State,
   InMemoryLayer,
   type StateService,
   type Message,
-} from "./State.js"
-
-// Agent
-export {
   Agent,
   makeAgent,
-  layer as AgentLayer,
+  AgentLayer,
   type AgentConfig,
   type AgentRole,
   type AgentRunResult,
   type AgentService,
-} from "./Agent.js"
+} from "@mnemo/core"
 
-// Room
+// Harness-specific: Room
+export { RoomError } from "./Errors.js"
+
+export {
+  verifierTools,
+  proverTools,
+} from "./tools.js"
+
 export {
   Room,
   makeRoom,

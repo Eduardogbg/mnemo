@@ -22,6 +22,7 @@ export {
   FoundryLive,
   FoundryError,
   type ForgeTestResult,
+  type ForgeScriptResult,
   type ForgeBuildResult,
   type ContractArtifact,
 } from "./Foundry.js"

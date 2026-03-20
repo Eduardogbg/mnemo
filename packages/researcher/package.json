@@ -1,5 +1,5 @@
 {
-  "name": "@mnemo/harness",
+  "name": "@mnemo/researcher",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -7,16 +7,13 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "demo:negotiate": "bun run src/DualAgentTest.ts"
+    "demo": "bun run src/demo.ts"
   },
   "dependencies": {
     "effect": "^3.19.14",
-    "@effect/ai": "^0.33.2",
-    "@effect/ai-openai": "^0.37.2",
-    "@effect/experimental": "^0.58.0",
-    "@effect/platform": "^0.94.1",
     "@mnemo/core": "workspace:*",
-    "@mnemo/venice": "workspace:*",
+    "@mnemo/harness": "workspace:*",
+    "@mnemo/chain": "workspace:*",
     "@mnemo/verity": "workspace:*"
   },
   "devDependencies": {
