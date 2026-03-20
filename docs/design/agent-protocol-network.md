@@ -129,6 +129,8 @@ DisclosureIntent {
   researcherAgentId: uint256      // ERC-8004 token ID
   protocolId: uint256             // MnemoRegistry listing ID
   targetAddress: address          // The specific contract a finding was identified in
+                                  // Only safe because this goes through the private TEE gateway channel —
+                                  // if this were on-chain, even the address would leak "someone found a bug in contract X"
   attestation: bytes              // TEE attestation proving the agent's identity
   timestamp: uint256
 }
@@ -138,9 +140,11 @@ The intent reveals almost nothing: "an attested agent found something in contrac
 
 ### 3.3 Why Not On-Chain Intent?
 
-Putting the disclosure intent on-chain would reveal that a specific protocol has a reported vulnerability before the negotiation even starts. This is an information leak. Front-runners and attackers watch the chain. A `DisclosureIntent` event for Protocol X would signal "someone found a bug in X" to the entire world.
+Putting the disclosure intent on-chain would reveal that a specific protocol has a reported vulnerability before the negotiation even starts. This is a catastrophic information leak.
 
-The intent is transmitted through the TEE Gateway (encrypted, attested channel). Only the protocol's agent sees it. If the protocol rejects, nothing is visible to anyone.
+A `DisclosureIntent` event for Protocol X would signal "someone found a bug in X" to the entire world. Front-runners would immediately short the token. Attackers would scrutinize the protocol to find and exploit the bug themselves before it can be patched. **EVEN THE TARGET ADDRESS IS A LEAK.** An on-chain event saying "vulnerability in contract 0x123..." immediately tells everyone that 0x123 is vulnerable—the public can read its code, fork the chain, and replay the exploit.
+
+The intent is transmitted through the TEE Gateway (encrypted, attested channel) instead. Only the protocol's agent sees it. If the protocol rejects, nothing is visible to anyone. The only on-chain record of a disclosed vulnerability is the final settlement (escrow, reputation) which is intentionally opaque: the commit hash is a hash, not the vulnerability details.
 
 ### 3.4 The Handshake
 
