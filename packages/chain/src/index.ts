@@ -20,6 +20,7 @@ export {
   identityRegistryAbi,
   reputationRegistryAbi,
   mnemoEscrowAbi,
+  mnemoRegistryAbi,
   mnemoReputationAbi,
 } from "./erc8004/abi.js"
 
@@ -34,6 +35,16 @@ export {
   type EscrowStatus,
   type CreateEscrowParams,
 } from "./EscrowClient.js"
+
+// Registry
+export {
+  Registry,
+  RegistryError,
+  localLayer as RegistryLocalLayer,
+  sepoliaLayer as RegistrySepoliaLayer,
+  type RegistryService,
+  type ProtocolData,
+} from "./RegistryClient.js"
 
 // IPFS
 export {

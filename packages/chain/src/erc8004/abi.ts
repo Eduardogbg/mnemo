@@ -244,6 +244,100 @@ export const mnemoEscrowAbi = [
 ] as const
 
 // ---------------------------------------------------------------------------
+// MnemoRegistry ABI (minimal — for RegistryClient)
+// ---------------------------------------------------------------------------
+
+export const mnemoRegistryAbi = [
+  {
+    type: "function",
+    name: "register",
+    inputs: [
+      { name: "metadataURI", type: "string" },
+      { name: "maxBounty", type: "uint256" },
+    ],
+    outputs: [{ name: "protocolId", type: "uint256" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "update",
+    inputs: [
+      { name: "protocolId", type: "uint256" },
+      { name: "metadataURI", type: "string" },
+      { name: "maxBounty", type: "uint256" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "deactivate",
+    inputs: [{ name: "protocolId", type: "uint256" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "getProtocol",
+    inputs: [{ name: "protocolId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "metadataURI", type: "string" },
+          { name: "maxBounty", type: "uint256" },
+          { name: "active", type: "bool" },
+          { name: "registeredAt", type: "uint256" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "isActive",
+    inputs: [{ name: "protocolId", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "nextProtocolId",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "event",
+    name: "ProtocolRegistered",
+    inputs: [
+      { name: "protocolId", type: "uint256", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "metadataURI", type: "string", indexed: false },
+      { name: "maxBounty", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ProtocolUpdated",
+    inputs: [
+      { name: "protocolId", type: "uint256", indexed: true },
+      { name: "metadataURI", type: "string", indexed: false },
+      { name: "maxBounty", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ProtocolDeactivated",
+    inputs: [
+      { name: "protocolId", type: "uint256", indexed: true },
+    ],
+  },
+] as const
+
+// ---------------------------------------------------------------------------
 // MnemoReputation ABI (minimal)
 // ---------------------------------------------------------------------------
 
