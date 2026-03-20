@@ -2,6 +2,7 @@ import { useState, useCallback } from "react"
 import { ChallengePicker } from "./components/ChallengePicker"
 import { Transcript } from "./components/Transcript"
 import { OutcomeDisplay } from "./components/OutcomeDisplay"
+import { EvidencePanel } from "./components/EvidencePanel"
 
 export interface Turn {
   turnNumber: number
@@ -10,16 +11,46 @@ export interface Turn {
   toolCalls: Array<{ name: string; args: Record<string, unknown> }>
 }
 
+export interface VerificationData {
+  status: "running" | "passed" | "failed" | "error"
+  verdict?: string
+  evidence?: string
+  executionTimeMs?: number
+}
+
+export interface EscrowData {
+  escrowId: string
+  status: string
+  txHash?: string
+}
+
+export interface IpfsData {
+  cid: string
+  url: string
+}
+
 export interface Outcome {
   outcome: "ACCEPTED" | "REJECTED" | "EXHAUSTED"
   totalTurns: number
   assignedSeverity?: string
   agreedSeverity?: string
+  evidence?: string
+  verification?: VerificationData | null
+  escrow?: EscrowData | null
+  ipfs?: IpfsData | null
 }
 
 type AppState =
   | { phase: "pick" }
-  | { phase: "running"; roomId: string; turns: Turn[]; challengeName: string }
+  | {
+      phase: "running"
+      roomId: string
+      turns: Turn[]
+      challengeName: string
+      verification: VerificationData | null
+      escrow: EscrowData | null
+      ipfs: IpfsData | null
+    }
   | { phase: "done"; roomId: string; turns: Turn[]; outcome: Outcome; challengeName: string }
 
 export function App() {
@@ -38,9 +69,17 @@ export function App() {
     }
     const { roomId } = (await res.json()) as { roomId: string }
 
-    setState({ phase: "running", roomId, turns: [], challengeName })
+    setState({
+      phase: "running",
+      roomId,
+      turns: [],
+      challengeName,
+      verification: null,
+      escrow: null,
+      ipfs: null,
+    })
 
-    // Connect WebSocket for real-time turns
+    // Connect WebSocket for real-time events
     const wsUrl = `ws://${window.location.host}/ws/${roomId}`
     const ws = new WebSocket(wsUrl)
 
@@ -48,11 +87,29 @@ export function App() {
       const msg = JSON.parse(event.data) as
         | { type: "turn"; data: Turn }
         | { type: "outcome"; data: Outcome }
+        | { type: "verification"; data: VerificationData }
+        | { type: "escrow"; data: EscrowData }
+        | { type: "ipfs"; data: IpfsData }
 
       if (msg.type === "turn") {
         setState((prev) => {
           if (prev.phase !== "running") return prev
           return { ...prev, turns: [...prev.turns, msg.data] }
+        })
+      } else if (msg.type === "verification") {
+        setState((prev) => {
+          if (prev.phase !== "running") return prev
+          return { ...prev, verification: msg.data }
+        })
+      } else if (msg.type === "escrow") {
+        setState((prev) => {
+          if (prev.phase !== "running") return prev
+          return { ...prev, escrow: msg.data }
+        })
+      } else if (msg.type === "ipfs") {
+        setState((prev) => {
+          if (prev.phase !== "running") return prev
+          return { ...prev, ipfs: msg.data }
         })
       } else if (msg.type === "outcome") {
         setState((prev) => {
@@ -91,11 +148,23 @@ export function App() {
             totalTurns: turns.length,
             assignedSeverity: data.assignedSeverity,
             agreedSeverity: data.agreedSeverity,
+            evidence: data.evidence,
+            verification: data.verification,
+            escrow: data.escrow,
+            ipfs: data.ipfs,
           },
           challengeName,
         })
       } else {
-        setState({ phase: "running", roomId, turns, challengeName })
+        setState({
+          phase: "running",
+          roomId,
+          turns,
+          challengeName,
+          verification: data.verification ?? null,
+          escrow: data.escrow ?? null,
+          ipfs: data.ipfs ?? null,
+        })
         setTimeout(poll, 1000)
       }
     }
@@ -135,6 +204,16 @@ export function App() {
               Negotiating…
             </span>
           </div>
+
+          {/* Show live verification/escrow status during negotiation */}
+          {(state.verification || state.escrow) && (
+            <EvidencePanel
+              verification={state.verification}
+              escrow={state.escrow}
+              ipfs={state.ipfs}
+            />
+          )}
+
           <Transcript turns={state.turns} />
         </div>
       )}

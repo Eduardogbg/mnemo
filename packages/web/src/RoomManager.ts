@@ -1,9 +1,15 @@
 /**
  * RoomManager — manages active negotiation rooms.
  *
- * Each room gets an Effect PubSub for real-time turn streaming (consumed by
+ * Each room gets an Effect PubSub for real-time event streaming (consumed by
  * the WebSocket handler) and a forked Fiber running the negotiation loop.
+ *
+ * Wires together:
+ *   - @mnemo/verifier (forge verification pipeline)
+ *   - @mnemo/chain (escrow simulation + IPFS archival)
+ *   - @mnemo/harness (negotiation turn loop)
  */
+import * as path from "node:path"
 import { Context, Effect, Layer, PubSub, Fiber, Option, Redacted } from "effect"
 import {
   makeRoom,
@@ -18,19 +24,55 @@ import {
   VERIFIER_SYSTEM_PROMPT,
   verifyForgeOnly,
   type HybridChallenge,
+  type HybridResult,
 } from "@mnemo/verifier"
+import { FoundryLive } from "@mnemo/dvdefi"
+import {
+  Escrow,
+  EscrowLocalLayer,
+  type EscrowStatus,
+} from "@mnemo/chain"
 import { proverTools, verifierTools, type AgentConfig } from "@mnemo/harness"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** Events streamed via WebSocket PubSub. */
+export type RoomEvent =
+  | { type: "turn"; data: Turn }
+  | { type: "verification"; data: VerificationEvent }
+  | { type: "escrow"; data: EscrowEvent }
+  | { type: "ipfs"; data: IpfsEvent }
+
+export interface VerificationEvent {
+  readonly status: "running" | "passed" | "failed" | "error"
+  readonly verdict?: string
+  readonly evidence?: string
+  readonly executionTimeMs?: number
+}
+
+export interface EscrowEvent {
+  readonly escrowId: string
+  readonly status: EscrowStatus
+  readonly txHash?: string
+}
+
+export interface IpfsEvent {
+  readonly cid: string
+  readonly url: string
+}
+
 export interface RoomEntry {
   readonly challengeId: string
-  readonly pubsub: PubSub.PubSub<Turn>
-  readonly fiber: Fiber.RuntimeFiber<NegotiationResult | void, unknown>
+  readonly pubsub: PubSub.PubSub<RoomEvent>
+  fiber: Fiber.RuntimeFiber<NegotiationResult | void, unknown>
   result: NegotiationResult | null
   turns: Turn[]
+  evidence: string | null
+  verification: VerificationEvent | null
+  escrow: EscrowEvent | null
+  ipfs: IpfsEvent | null
 }
 
 // ---------------------------------------------------------------------------
@@ -43,8 +85,12 @@ export interface RoomManagerService {
     status: "running" | "finished"
     turns: Turn[]
     result: NegotiationResult | null
+    evidence: string | null
+    verification: VerificationEvent | null
+    escrow: EscrowEvent | null
+    ipfs: IpfsEvent | null
   }>
-  readonly subscribe: (roomId: string) => Effect.Effect<PubSub.PubSub<Turn> | null>
+  readonly subscribe: (roomId: string) => Effect.Effect<PubSub.PubSub<RoomEvent> | null>
   readonly listChallenges: () => ReadonlyArray<HybridChallenge>
 }
 
@@ -52,6 +98,12 @@ export class RoomManager extends Context.Tag("@mnemo/web/RoomManager")<
   RoomManager,
   RoomManagerService
 >() {}
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+const DVDEFI_ROOT = path.resolve(import.meta.dir, "../../../repos/damn-vulnerable-defi")
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -88,17 +140,27 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
   tools: verifierTools,
 })
 
-const formatEvidence = (result: { exploitTest: { passed: boolean }; patchedTest?: { passed: boolean } | null }): string => {
+const formatEvidence = (result: HybridResult): string => {
   const lines = [
-    `=== VERIFICATION EVIDENCE ===`,
+    `=== FORGE VERIFICATION RESULTS ===`,
+    `Challenge: ${result.challengeId}`,
+    `Verdict: ${result.verdict}`,
+    ``,
     `Exploit test: ${result.exploitTest.passed ? "PASSED — the exploit succeeds against the target contracts" : "FAILED — the exploit does not work"}`,
   ]
+  if (result.exploitTest.stderr) {
+    lines.push(`  Output: ${result.exploitTest.stderr.slice(0, 500)}`)
+  }
   if (result.patchedTest) {
     lines.push(
       `Patched test: ${result.patchedTest.passed ? "PASSED — the patched version blocks the exploit" : "FAILED — the patch does not block the exploit"}`,
     )
+    if (result.patchedTest.stderr) {
+      lines.push(`  Output: ${result.patchedTest.stderr.slice(0, 500)}`)
+    }
   }
-  if (result.exploitTest.passed && result.patchedTest?.passed) {
+  lines.push(``, `Execution time: ${result.executionTimeMs}ms`)
+  if (result.verdict === "VALID_BUG") {
     lines.push(
       ``,
       `Conclusion: The exploit succeeds against the original contracts and is blocked by the patched version.`,
@@ -106,6 +168,115 @@ const formatEvidence = (result: { exploitTest: { passed: boolean }; patchedTest?
   }
   return lines.join("\n")
 }
+
+/**
+ * Upload evidence to mock IPFS (in-process, no external server needed).
+ * Returns a deterministic CID based on content hash.
+ */
+const uploadToMockIpfs = async (evidence: Record<string, unknown>): Promise<IpfsEvent> => {
+  const json = JSON.stringify(evidence, null, 2)
+  const data = new TextEncoder().encode(json)
+  const hash = await crypto.subtle.digest("SHA-256", data)
+  const hex = Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  const cid = `bafybei${hex.slice(0, 52)}`
+  return { cid, url: `https://w3s.link/ipfs/${cid}` }
+}
+
+/**
+ * Run forge verification for a challenge.
+ * Returns the HybridResult or null if forge is unavailable.
+ */
+const runVerification = (
+  challenge: HybridChallenge,
+  pubsub: PubSub.PubSub<RoomEvent>,
+): Effect.Effect<HybridResult | null, never, never> =>
+  Effect.gen(function* () {
+    // Notify: verification starting
+    yield* PubSub.publish(pubsub, {
+      type: "verification",
+      data: { status: "running" },
+    })
+
+    const result = yield* verifyForgeOnly(challenge, DVDEFI_ROOT).pipe(
+      Effect.provide(FoundryLive),
+    )
+
+    const event: VerificationEvent = {
+      status: result.verdict === "VALID_BUG" ? "passed" : "failed",
+      verdict: result.verdict,
+      evidence: result.evidence,
+      executionTimeMs: result.executionTimeMs,
+    }
+    yield* PubSub.publish(pubsub, { type: "verification", data: event })
+
+    return result
+  }).pipe(
+    Effect.catchAll((error) =>
+      Effect.gen(function* () {
+        console.error("[RoomManager] Forge verification failed:", error)
+        yield* PubSub.publish(pubsub, {
+          type: "verification",
+          data: { status: "error", evidence: String(error) },
+        })
+        return null as HybridResult | null
+      }),
+    ),
+  )
+
+/**
+ * Run escrow lifecycle: create → fund → release/refund.
+ */
+const runEscrow = (
+  roomId: string,
+  pubsub: PubSub.PubSub<RoomEvent>,
+  accepted: boolean,
+): Effect.Effect<EscrowEvent | null, never, never> =>
+  Effect.gen(function* () {
+    const escrow = yield* Escrow
+
+    // Create escrow
+    const { escrowId, txHash: createTx } = yield* escrow.create({
+      funder: "0x" + "F".repeat(40),
+      payee: "0x" + "A".repeat(40),
+      amount: 1000000000000000000n, // 1 ETH
+      deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
+      commitHash: "0x" + roomId.replace(/[^a-f0-9]/gi, "").padEnd(64, "0").slice(0, 64),
+    })
+
+    const escrowIdStr = escrowId.toString()
+    yield* PubSub.publish(pubsub, {
+      type: "escrow",
+      data: { escrowId: escrowIdStr, status: "Created", txHash: createTx },
+    })
+
+    // Fund
+    const fundTx = yield* escrow.fund(escrowId, 1000000000000000000n)
+    yield* PubSub.publish(pubsub, {
+      type: "escrow",
+      data: { escrowId: escrowIdStr, status: "Funded", txHash: fundTx },
+    })
+
+    // Release or refund based on negotiation outcome
+    if (accepted) {
+      const releaseTx = yield* escrow.release(escrowId)
+      const event: EscrowEvent = { escrowId: escrowIdStr, status: "Released", txHash: releaseTx }
+      yield* PubSub.publish(pubsub, { type: "escrow", data: event })
+      return event
+    } else {
+      const refundTx = yield* escrow.refund(escrowId)
+      const event: EscrowEvent = { escrowId: escrowIdStr, status: "Refunded", txHash: refundTx }
+      yield* PubSub.publish(pubsub, { type: "escrow", data: event })
+      return event
+    }
+  }).pipe(
+    Effect.provide(EscrowLocalLayer("http://localhost:8545")),
+    Effect.catchAll((error) => {
+      console.error("[RoomManager] Escrow failed:", error)
+      return Effect.succeed(null as EscrowEvent | null)
+    }),
+  )
 
 export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
   RoomManager,
@@ -118,71 +289,120 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
         }
 
         const roomId = `room-${++roomCounter}-${Date.now()}`
-        const pubsub = yield* PubSub.unbounded<Turn>()
+        const pubsub = yield* PubSub.unbounded<RoomEvent>()
 
-        // Build a simple evidence string (skip forge for demo speed — just describe the challenge)
-        const evidence = [
-          `=== VERIFICATION EVIDENCE ===`,
-          `Challenge: ${challenge.name}`,
-          `Exploit test: PASSED — the exploit succeeds against the target contracts`,
-          `Patched test: PASSED — the patched version blocks the exploit`,
-          ``,
-          `Conclusion: The exploit succeeds against the original contracts and is blocked by the patched version.`,
-        ].join("\n")
-
-        const proverConfig = makeProverConfig(challenge)
-        const verifierConfig = makeVerifierConfig(evidence)
-
-        const turns: Turn[] = []
-
-        const room = makeRoom(proverConfig, verifierConfig, {
-          maxTurns: 6,
-          openingMessage: `Security researcher requesting verification of a vulnerability in ${challenge.name}. Please evaluate my findings.`,
-          onTurn: (turn) => {
-            turns.push(turn)
-            Effect.runFork(PubSub.publish(pubsub, turn))
-          },
-        })
-
-        // Build the provider layer from env
-        const apiKey = process.env.OPENROUTER_API_KEY
-        if (!apiKey) {
-          return yield* Effect.fail(new Error("OPENROUTER_API_KEY not set"))
+        const entry: RoomEntry = {
+          challengeId,
+          pubsub,
+          fiber: undefined as any, // set below
+          result: null,
+          turns: [],
+          evidence: null,
+          verification: null,
+          escrow: null,
+          ipfs: null,
         }
+        rooms.set(roomId, entry)
 
-        const providerLayer = layerFromConfig({
-          apiKey: Redacted.make(apiKey),
-          baseURL: "https://openrouter.ai/api/v1",
-          model: "deepseek/deepseek-chat",
-          temperature: 0.7,
-          maxTokens: 1024,
-        })
+        // Fork the full pipeline as a background fiber
+        const fiber = yield* Effect.gen(function* () {
+          // Step 1: Run forge verification
+          const forgeResult = yield* runVerification(challenge, pubsub)
 
-        // Fork the negotiation as a background fiber (daemon so it outlives the handler scope)
-        const fiber = yield* room
-          .negotiate()
-          .pipe(
-            Effect.provide(providerLayer),
-            Effect.provide(InMemoryLayer),
-            Effect.tap((result) =>
-              Effect.sync(() => {
-                const entry = rooms.get(roomId)
-                if (entry) entry.result = result
-              })
-            ),
-            Effect.tapErrorCause((cause) =>
-              Effect.log(`[RoomManager] Negotiation failed for ${roomId}: ${cause}`)
-            ),
-            Effect.catchAll((error) =>
-              Effect.sync(() => {
-                console.error(`[RoomManager] Negotiation error for ${roomId}:`, error)
-              })
-            ),
-          )
-          .pipe(Effect.forkDaemon)
+          // Build evidence string — real forge output or graceful fallback
+          let evidence: string
+          if (forgeResult) {
+            evidence = formatEvidence(forgeResult)
+            entry.evidence = evidence
+            entry.verification = {
+              status: forgeResult.verdict === "VALID_BUG" ? "passed" : "failed",
+              verdict: forgeResult.verdict,
+              evidence: forgeResult.evidence,
+              executionTimeMs: forgeResult.executionTimeMs,
+            }
+          } else {
+            // Fallback: forge unavailable, use challenge description
+            evidence = [
+              `=== VERIFICATION EVIDENCE ===`,
+              `Challenge: ${challenge.name}`,
+              `Note: Forge verification unavailable — using challenge description.`,
+              `Description: ${challenge.description}`,
+            ].join("\n")
+            entry.evidence = evidence
+            entry.verification = { status: "error", evidence: "Forge unavailable" }
+          }
 
-        rooms.set(roomId, { challengeId, pubsub, fiber, result: null, turns })
+          // Step 2: Run negotiation with real evidence
+          const proverConfig = makeProverConfig(challenge)
+          const verifierConfig = makeVerifierConfig(evidence)
 
+          const room = makeRoom(proverConfig, verifierConfig, {
+            maxTurns: 6,
+            openingMessage: `Security researcher requesting verification of a vulnerability in ${challenge.name}. Please evaluate my findings.`,
+            onTurn: (turn) => {
+              entry.turns.push(turn)
+              Effect.runFork(PubSub.publish(pubsub, { type: "turn", data: turn }))
+            },
+          })
+
+          const apiKey = process.env.OPENROUTER_API_KEY
+          if (!apiKey) {
+            return yield* Effect.fail(new Error("OPENROUTER_API_KEY not set"))
+          }
+
+          const providerLayer = layerFromConfig({
+            apiKey: Redacted.make(apiKey),
+            baseURL: "https://openrouter.ai/api/v1",
+            model: "deepseek/deepseek-chat",
+            temperature: 0.7,
+            maxTokens: 1024,
+          })
+
+          const result: NegotiationResult = yield* room
+            .negotiate()
+            .pipe(
+              Effect.provide(providerLayer),
+              Effect.provide(InMemoryLayer),
+            )
+
+          entry.result = result
+
+          // Step 3: Run escrow lifecycle
+          const accepted = result.outcome === "ACCEPTED"
+          const escrowResult = yield* runEscrow(roomId, pubsub, accepted)
+          entry.escrow = escrowResult
+
+          // Step 4: Archive evidence to IPFS
+          const ipfsPayload = {
+            roomId,
+            challengeId,
+            outcome: result.outcome,
+            verdict: forgeResult?.verdict ?? null,
+            severity: result.agreedSeverity ?? result.assignedSeverity ?? null,
+            evidence: forgeResult?.evidence ?? evidence,
+            totalTurns: result.totalTurns,
+            escrowId: escrowResult?.escrowId ?? null,
+            timestamp: new Date().toISOString(),
+          }
+
+          const ipfsResult = yield* Effect.promise(() => uploadToMockIpfs(ipfsPayload))
+          entry.ipfs = ipfsResult
+          yield* PubSub.publish(pubsub, { type: "ipfs", data: ipfsResult })
+
+          return result
+        }).pipe(
+          Effect.tapErrorCause((cause) =>
+            Effect.log(`[RoomManager] Pipeline failed for ${roomId}: ${cause}`),
+          ),
+          Effect.catchAll((error) =>
+            Effect.sync(() => {
+              console.error(`[RoomManager] Pipeline error for ${roomId}:`, error)
+            }),
+          ),
+          Effect.forkDaemon,
+        )
+
+        entry.fiber = fiber
         return roomId
       }),
 
@@ -193,6 +413,10 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
         status: entry.result ? "finished" as const : "running" as const,
         turns: entry.turns,
         result: entry.result,
+        evidence: entry.evidence,
+        verification: entry.verification,
+        escrow: entry.escrow,
+        ipfs: entry.ipfs,
       })
     },
 

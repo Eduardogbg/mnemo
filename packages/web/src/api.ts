@@ -33,6 +33,24 @@ export class TurnSchema extends Schema.Class<TurnSchema>("TurnSchema")({
   toolCalls: Schema.Array(ToolCallSchema),
 }) {}
 
+export class VerificationSchema extends Schema.Class<VerificationSchema>("VerificationSchema")({
+  status: Schema.Literal("running", "passed", "failed", "error"),
+  verdict: Schema.optionalWith(Schema.String, { as: "Option" }),
+  evidence: Schema.optionalWith(Schema.String, { as: "Option" }),
+  executionTimeMs: Schema.optionalWith(Schema.Number, { as: "Option" }),
+}) {}
+
+export class EscrowSchema extends Schema.Class<EscrowSchema>("EscrowSchema")({
+  escrowId: Schema.String,
+  status: Schema.String,
+  txHash: Schema.optionalWith(Schema.String, { as: "Option" }),
+}) {}
+
+export class IpfsSchema extends Schema.Class<IpfsSchema>("IpfsSchema")({
+  cid: Schema.String,
+  url: Schema.String,
+}) {}
+
 export class RoomStatus extends Schema.Class<RoomStatus>("RoomStatus")({
   roomId: Schema.String,
   status: Schema.Literal("running", "finished"),
@@ -40,6 +58,10 @@ export class RoomStatus extends Schema.Class<RoomStatus>("RoomStatus")({
   outcome: Schema.optionalWith(Schema.Literal("ACCEPTED", "REJECTED", "EXHAUSTED"), { as: "Option" }),
   assignedSeverity: Schema.optionalWith(Schema.String, { as: "Option" }),
   agreedSeverity: Schema.optionalWith(Schema.String, { as: "Option" }),
+  evidence: Schema.optionalWith(Schema.String, { as: "Option" }),
+  verification: Schema.optionalWith(VerificationSchema, { as: "Option" }),
+  escrow: Schema.optionalWith(EscrowSchema, { as: "Option" }),
+  ipfs: Schema.optionalWith(IpfsSchema, { as: "Option" }),
 }) {}
 
 export class ChallengeInfo extends Schema.Class<ChallengeInfo>("ChallengeInfo")({

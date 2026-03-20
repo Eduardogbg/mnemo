@@ -39,6 +39,23 @@ export const RoomsApiLive = HttpApiBuilder.group(MnemoApi, "rooms", (handlers) =
           outcome: s.result ? Option.some(s.result.outcome) : Option.none(),
           assignedSeverity: s.result?.assignedSeverity ? Option.some(s.result.assignedSeverity) : Option.none(),
           agreedSeverity: s.result?.agreedSeverity ? Option.some(s.result.agreedSeverity) : Option.none(),
+          evidence: s.evidence ? Option.some(s.evidence) : Option.none(),
+          verification: s.verification
+            ? Option.some({
+                status: s.verification.status,
+                verdict: s.verification.verdict ? Option.some(s.verification.verdict) : Option.none(),
+                evidence: s.verification.evidence ? Option.some(s.verification.evidence) : Option.none(),
+                executionTimeMs: s.verification.executionTimeMs != null ? Option.some(s.verification.executionTimeMs) : Option.none(),
+              })
+            : Option.none(),
+          escrow: s.escrow
+            ? Option.some({
+                escrowId: s.escrow.escrowId,
+                status: s.escrow.status,
+                txHash: s.escrow.txHash ? Option.some(s.escrow.txHash) : Option.none(),
+              })
+            : Option.none(),
+          ipfs: s.ipfs ? Option.some(s.ipfs) : Option.none(),
         }
       })
     )

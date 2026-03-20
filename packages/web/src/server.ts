@@ -23,7 +23,7 @@ import { BunHttpServer } from "@effect/platform-bun"
 import { Effect, Layer, PubSub, Queue } from "effect"
 import { MnemoApi } from "./api.js"
 import { RoomsApiLive } from "./handlers.js"
-import { RoomManager, RoomManagerLive } from "./RoomManager.js"
+import { RoomManager, RoomManagerLive, type RoomEvent } from "./RoomManager.js"
 
 // Bun HTML import — triggers the built-in bundler for TSX/CSS
 import index from "../ui/index.html"
@@ -99,33 +99,62 @@ const server = Bun.serve<{ roomId: string }>({
             return
           }
 
-          // Send existing turns first
+          // Send existing state first
           const status = mgr.getStatus(roomId)
           if (status._tag === "Some") {
             for (const turn of status.value.turns) {
               ws.send(JSON.stringify({ type: "turn", data: turn }))
             }
+            if (status.value.verification) {
+              ws.send(JSON.stringify({ type: "verification", data: status.value.verification }))
+            }
+            if (status.value.escrow) {
+              ws.send(JSON.stringify({ type: "escrow", data: status.value.escrow }))
+            }
+            if (status.value.ipfs) {
+              ws.send(JSON.stringify({ type: "ipfs", data: status.value.ipfs }))
+            }
             if (status.value.result) {
-              ws.send(JSON.stringify({ type: "outcome", data: status.value.result }))
+              ws.send(JSON.stringify({
+                type: "outcome",
+                data: {
+                  ...status.value.result,
+                  evidence: status.value.evidence,
+                  verification: status.value.verification,
+                  escrow: status.value.escrow,
+                  ipfs: status.value.ipfs,
+                },
+              }))
               ws.close()
               return
             }
           }
 
-          // Subscribe to new turns (PubSub.subscribe is scoped — the outer Effect.scoped handles it)
+          // Subscribe to events (PubSub.subscribe is scoped — the outer Effect.scoped handles it)
           const queue = yield* PubSub.subscribe(pubsub)
 
-          // Consume turns from the queue
+          // Consume events from the queue
           while (true) {
-            const turn = yield* Queue.take(queue)
-            ws.send(JSON.stringify({ type: "turn", data: turn }))
+            const event = yield* Queue.take(queue)
+            ws.send(JSON.stringify(event))
 
-            // Check if room finished after this turn
-            const s = mgr.getStatus(roomId)
-            if (s._tag === "Some" && s.value.result) {
-              ws.send(JSON.stringify({ type: "outcome", data: s.value.result }))
-              ws.close()
-              return
+            // Check if room finished after a turn event
+            if (event.type === "turn") {
+              const s = mgr.getStatus(roomId)
+              if (s._tag === "Some" && s.value.result) {
+                ws.send(JSON.stringify({
+                  type: "outcome",
+                  data: {
+                    ...s.value.result,
+                    evidence: s.value.evidence,
+                    verification: s.value.verification,
+                    escrow: s.value.escrow,
+                    ipfs: s.value.ipfs,
+                  },
+                }))
+                ws.close()
+                return
+              }
             }
           }
         }),

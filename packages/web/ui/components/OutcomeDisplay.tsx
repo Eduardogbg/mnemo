@@ -1,4 +1,5 @@
 import type { Outcome } from "../App"
+import { EvidencePanel } from "./EvidencePanel"
 
 interface Props {
   outcome: Outcome
@@ -21,27 +22,36 @@ export function OutcomeDisplay({ outcome }: Props) {
   const config = outcomeConfig[outcome.outcome] ?? outcomeConfig.EXHAUSTED
 
   return (
-    <div className={`mt-6 rounded-lg border p-5 ${config.bg}`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className={`text-lg font-bold ${config.color}`}>
-              {config.label}
-            </span>
-            {outcome.agreedSeverity && (
-              <span className={`text-sm font-mono font-medium ${severityConfig[outcome.agreedSeverity]?.color ?? "text-zinc-400"}`}>
-                {outcome.agreedSeverity.toUpperCase()}
+    <div>
+      <div className={`mt-6 rounded-lg border p-5 ${config.bg}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <span className={`text-lg font-bold ${config.color}`}>
+                {config.label}
               </span>
-            )}
+              {outcome.agreedSeverity && (
+                <span className={`text-sm font-mono font-medium ${severityConfig[outcome.agreedSeverity]?.color ?? "text-zinc-400"}`}>
+                  {outcome.agreedSeverity.toUpperCase()}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500 mt-1">
+              {outcome.totalTurns} turn{outcome.totalTurns !== 1 ? "s" : ""}
+              {outcome.assignedSeverity && !outcome.agreedSeverity && (
+                <span> · Assigned: {outcome.assignedSeverity} (not agreed)</span>
+              )}
+            </p>
           </div>
-          <p className="text-xs text-zinc-500 mt-1">
-            {outcome.totalTurns} turn{outcome.totalTurns !== 1 ? "s" : ""}
-            {outcome.assignedSeverity && !outcome.agreedSeverity && (
-              <span> · Assigned: {outcome.assignedSeverity} (not agreed)</span>
-            )}
-          </p>
         </div>
       </div>
+
+      <EvidencePanel
+        evidence={outcome.evidence}
+        verification={outcome.verification}
+        escrow={outcome.escrow}
+        ipfs={outcome.ipfs}
+      />
     </div>
   )
 }

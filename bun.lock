@@ -127,6 +127,8 @@
       "dependencies": {
         "@effect/platform": "^0.94.1",
         "@effect/platform-bun": "^0.59.0",
+        "@mnemo/chain": "workspace:*",
+        "@mnemo/dvdefi": "workspace:*",
         "@mnemo/harness": "workspace:*",
         "@mnemo/verifier": "workspace:*",
         "effect": "^3.19.14",
