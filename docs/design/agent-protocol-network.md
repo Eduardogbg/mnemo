@@ -128,14 +128,13 @@ When the researcher agent finds a vulnerability, it does not immediately enter a
 DisclosureIntent {
   researcherAgentId: uint256      // ERC-8004 token ID
   protocolId: uint256             // MnemoRegistry listing ID
-  severityHint: "Critical" | "High" | "Medium" | "Low"
-  componentHint: string           // e.g., "liquidation logic" (deliberately vague)
+  targetAddress: address          // The specific contract a finding was identified in
   attestation: bytes              // TEE attestation proving the agent's identity
   timestamp: uint256
 }
 ```
 
-The intent reveals almost nothing: "an attested agent found something, probably in this component, at this severity." No details. No PoC. The protocol's agent decides whether to accept and enter a room.
+The intent reveals almost nothing: "an attested agent found something in contract X." No severity. No component hint. No details. No PoC. Severity is information — it is a negotiating position, and leaking it before the room opens gives the protocol an asymmetric advantage (they know what tier to prepare for without having consented to receive the finding). The protocol's agent decides whether to accept and enter a room based solely on the researcher's reputation and the fact that a finding exists for a contract they have listed.
 
 ### 3.3 Why Not On-Chain Intent?
 
@@ -150,14 +149,16 @@ The intent is transmitted through the TEE Gateway (encrypted, attested channel).
 2. Gateway verifies researcher's TEE attestation
 3. Gateway routes intent to the protocol agent (identified by protocolId -> teeEndpoint)
 4. Protocol agent evaluates:
-   - Is this agent reputable? (check ERC-8004 reputation)
-   - Is the severity worth engaging? (compare against bounty terms)
-   - Is the component in scope? (compare against metadata)
+   - Is this agent reputable? (check ERC-8004 reputation score)
+   - Is the targetAddress a contract in scope for this listing?
+   - Is the bounty program still active?
+   (No severity or component information is available here — the protocol decides
+   whether to engage based on who is asking, not what they found.)
 5a. Protocol agent accepts -> Gateway creates a Mnemo room, both agents enter
 5b. Protocol agent rejects -> researcher is notified, no room created
 ```
 
-The protocol agent can apply its own heuristics for filtering. An agent with zero reputation claiming a critical bug might be required to post a small stake (anti-spam deposit returned on valid submission). An agent with a strong track record gets in immediately.
+The protocol agent applies heuristics based only on identity and scope signals. An agent with zero reputation might be required to post a small stake (anti-spam deposit returned on valid submission). An agent with a strong track record gets in immediately. Severity is revealed inside the room — that is the point of the room.
 
 ### 3.5 Hackathon Simplification
 
@@ -195,17 +196,32 @@ How does the protocol prove it controls the contracts listed in the registry? Th
 - A malicious actor could register contracts they do not control, creating fake bounties to waste agent resources.
 - The researcher agent needs to know that the entity negotiating in the room actually has authority to pay the bounty.
 
-**Solution: ownership proof at registration time.**
+**Solution: flexible relationship proof at registration time.**
 
-When a protocol registers in MnemoRegistry, it must prove ownership of the target contracts. Three mechanisms, in order of preference:
+The naive approach is `require(Ownable(target).owner() == msg.sender)`. This fails in practice for several common cases:
 
-1. **Direct owner()**: If the target contract has an `owner()` function, the registry requires `msg.sender == target.owner()`. This is a simple on-chain check.
+- **Burned admin key**: Protocols that renounced ownership after deployment have no `owner()` to check against.
+- **Proxy admin pattern**: The `owner()` of a proxy is the proxy admin contract, not the protocol multisig. The multisig controls the admin contract, but a direct `owner()` check returns the wrong address.
+- **CREATE2 deployer discarded**: Many factory-deployed contracts have a deployer address that was a one-time deployment key, not the ongoing operator.
+- **Rotating Safe signers**: A Gnosis Safe's signer set can rotate after deployment. The current signers may differ from whoever originally called `owner()`.
 
-2. **CREATE2 deployer**: The registry accepts proof that the registrant deployed the contract. This is verified by checking the CREATE2 address derivation or by checking the deployer address from the contract's creation transaction (off-chain, verified by the TEE).
+**Recommended approach: EIP-712 signature + on-chain relationship proof.**
 
-3. **Multisig signature**: For contracts owned by multisigs (Gnosis Safe, etc.), the registrant submits a signed message from the multisig. The registry verifies the signature on-chain.
+The registrant signs an EIP-712 message attesting to the registration. Separately, they provide a proof that their signing address has a recognized relationship to the target contract. The registry accepts multiple proof types:
 
-For the hackathon, we use option 1 only: `require(Ownable(target).owner() == msg.sender)`. This covers most simple contracts and all the DVDeFi challenge contracts.
+1. **owner() match**: `target.owner() == signer`. Simple on-chain call. Covers Ownable contracts where ownership has not been transferred to a proxy admin.
+
+2. **AccessControl admin role**: `target.hasRole(DEFAULT_ADMIN_ROLE, signer)`. Covers OpenZeppelin AccessControl patterns.
+
+3. **Safe signer**: The signer is a current signer in a Gnosis Safe that controls the contract. Verified by calling `GnosisSafe(safeAddress).isOwner(signer)` and confirming the Safe is the contract's owner or admin.
+
+4. **Deployer proof**: The contract's creation transaction originated from `signer`. This is verified off-chain by the TEE (reads the creation tx from RPC) and submitted as a signed attestation. Covers CREATE2-deployed contracts and factory patterns.
+
+5. **Custom verifier**: The target contract implements a `MnemoOwnershipProof` interface that returns true for the claimed registrant. Opt-in for protocols that want explicit Mnemo support.
+
+The registry contract stores which proof type was used. Agents and verifiers can inspect this and weight their trust accordingly — a Safe-signer proof on a proxy-controlled contract is stronger evidence than a deployer proof on a discarded key.
+
+**For the hackathon**, we use proof type 1 only: `require(Ownable(target).owner() == msg.sender)`. This covers all the DVDeFi challenge contracts. The design above is documented as the production target so that the registry contract can be extended without a breaking change — proof type is stored alongside the listing, and new types can be added as the registry evolves.
 
 ### 4.3 Protocol Agent Identity
 
@@ -252,13 +268,13 @@ Phase 2: Analysis (off-chain, inside researcher's TEE)
 
 Phase 3: Connection
   8. Agent submits DisclosureIntent to TEE Gateway:
-     { researcherAgentId, protocolId, severityHint: "Critical",
-       componentHint: "withdrawal logic", attestation }
+     { researcherAgentId, protocolId, targetAddress: "0x...", attestation }
   9. Gateway verifies researcher attestation, routes intent to protocol agent
   10. Protocol agent evaluates intent:
       - Check researcher reputation (ERC-8004 feedback count/score)
-      - Check severity vs bounty terms (Critical -> max 100 ETH, worth engaging)
-      - Check component is in scope ("withdrawal logic" is covered)
+      - Check targetAddress is a contract in their registered scope
+      - No severity or component information is available at this stage — that
+        is revealed inside the room
   11. Protocol agent accepts -> Gateway creates Mnemo room
 
 Phase 4: Negotiation (inside Mnemo room, standard protocol)
@@ -374,15 +390,15 @@ F6: Duplicate vulnerability
 
 - `MnemoRegistry.sol` -- simple registry contract (see section 7). Deploy to Base Sepolia.
 - Registry client in `@mnemo/chain` -- Effect service matching the existing pattern (Escrow, Erc8004).
-- Hardcoded discovery in the researcher agent: reads one registry entry, analyzes one target (Side Entrance from DVDeFi).
+- **Event-based discovery**: researcher agent reads `ProtocolRegistered` events from MnemoRegistry on startup and selects a target from the live registry. This is the core demo story: protocol registers on-chain → agent discovers via event → agent analyzes → agent discloses. Hardcoding the target breaks this narrative entirely.
 - Single TEE instance hosts everything: researcher agent, protocol agent, room, verifier.
 - The "connection" is an in-process call: researcher finds bug, creates intent, protocol accepts, room opens.
 
 **Tier 2: Nice to have**
 
-- Event-based discovery: researcher agent watches for `ProtocolRegistered` events.
-- Protocol agent that actually evaluates the disclosure intent (checks reputation, severity, scope).
+- Protocol agent that actually evaluates the disclosure intent (checks reputation, scope, whether the target address is in their listing).
 - IPFS metadata upload for protocol registration (using existing `uploadProtocolMetadata` from `@mnemo/chain`).
+- Real-time subscription to new `ProtocolRegistered` events (ongoing discovery beyond the startup read).
 
 **Tier 3: Out of scope**
 
@@ -398,7 +414,8 @@ F6: Duplicate vulnerability
 | Registry contract | Deployed on Base Sepolia | -- |
 | Protocol metadata | IPFS CID (or inline for demo) | -- |
 | TEE attestation | dstack simulator | Real TEE |
-| Researcher analysis | Foundry + Slither on DVDeFi | Autonomous target selection |
+| Event-based discovery | Real (reads ProtocolRegistered events) | -- |
+| Researcher analysis | Foundry + Slither on DVDeFi | Truly autonomous target selection |
 | Connection/routing | In-process function call | TEE Gateway network routing |
 | Escrow | MnemoEscrow on Base Sepolia | -- |
 | Reputation | MnemoReputation on Base Sepolia | -- |
@@ -407,12 +424,13 @@ F6: Duplicate vulnerability
 
 The demo walks through the complete flow in one shot:
 
-1. "Here is a protocol registered on Base Sepolia with a bug bounty" (show registry tx)
-2. "The ethical hacker agent discovers it, analyzes the contracts" (show analysis output)
-3. "It finds a vulnerability and opens a disclosure" (show intent)
-4. "Both agents enter a Mnemo room and negotiate" (show room messages with scoped reveals)
-5. "They agree on terms, escrow is funded and released" (show on-chain txs)
-6. "Both agents get reputation" (show ERC-8004 entries)
+1. "Here is a protocol registered on Base Sepolia with a bug bounty" (show registry tx, show the `ProtocolRegistered` event)
+2. "The agent starts up, reads `ProtocolRegistered` events, and selects this protocol as a target" (show the discovery step — this is the key moment that distinguishes Mnemo from a hardcoded script)
+3. "The agent analyzes the contracts inside the TEE" (show analysis output)
+4. "It finds a vulnerability and sends a disclosure intent — no severity, no details, just the contract address and the agent's attestation" (show intent)
+5. "Both agents enter a Mnemo room and negotiate" (show room messages with scoped reveals — severity and details first appear here)
+6. "They agree on terms, escrow is funded and released" (show on-chain txs)
+7. "Both agents get reputation" (show ERC-8004 entries)
 
 Total on-chain artifacts visible to judges: registry entry, escrow lifecycle, reputation entries. All on Base Sepolia with real transactions.
 

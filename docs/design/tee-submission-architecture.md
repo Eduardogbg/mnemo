@@ -213,11 +213,18 @@ This signature is posted to the `MnemoRegistry` contract on Base. The contract s
 
 How do we know the registrant actually controls the contracts they claim?
 
-Option A (simple, sufficient for hackathon): The registrant's address must be the `owner()` or a member of the `admin` role on the target contracts. The agent checks this via `eth_call` to standard access control interfaces (Ownable, AccessControl, Gnosis Safe owners).
+Relying solely on `owner()` is fragile. It does not work for protocols that burned their admin key, proxy contracts where `owner()` returns the proxy admin address rather than the protocol multisig, CREATE2 deployments where the deployer key was discarded, or multisigs where signers have rotated since deployment.
 
-Option B (stronger, post-hackathon): The protocol deploys a `MnemoVerifier` contract that calls back to the registry to confirm ownership. This is a standard "prove you control this address" pattern.
+The registry accepts multiple proof types. The registrant provides an EIP-712 signature and declares which proof type applies:
 
-Option C (pragmatic fallback): If the contracts have no standard ownership interface, the registrant can prove control by executing a specific transaction from the admin address (e.g., calling a no-op function or emitting a specific event). The agent verifies this transaction exists on-chain.
+- **owner() match**: `target.owner() == signer`. Covers simple Ownable contracts.
+- **AccessControl admin role**: `target.hasRole(DEFAULT_ADMIN_ROLE, signer)`. Covers OpenZeppelin AccessControl patterns.
+- **Safe signer**: `GnosisSafe(safeAddress).isOwner(signer)` where the Safe is the contract's owner or admin.
+- **Deployer proof**: TEE verifies off-chain that the contract's creation transaction originated from `signer` and attests to this. Covers factory-deployed and CREATE2 contracts.
+
+The proof type used is stored alongside the listing so agents can assess its strength.
+
+**For the hackathon**: `owner()` match only. This covers DVDeFi challenge contracts. The multi-proof design is documented as the production target.
 
 ### 3.3 What Goes On-Chain vs Off-Chain
 
