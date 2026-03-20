@@ -240,7 +240,7 @@ The proof type used is stored alongside the listing so agents can assess its str
 
 ### 3.4 Hackathon Scope
 
-For March 22, we skip the full registry contract. The demo uses a hardcoded list of "registered protocols" (specifically, the DVDeFi challenges). The registration schema is documented and the EIP-712 message format is defined, but the on-chain registry contract is not deployed.
+For March 22, we deploy MnemoRegistry on Base Sepolia. The agent discovers targets by polling `nextProtocolId`. Protocol registration uses `owner()` match proof type only. The full multi-proof design (AccessControl, Safe signer, deployer proof) is documented as the production target.
 
 ---
 
@@ -285,13 +285,16 @@ Both agents connect to this WebSocket endpoint. The room server inside the TEE m
 
 **Discovery flow:**
 
-1. The ethical hacker agent monitors the `MnemoRegistry` contract for `ProtocolRegistered` events (or reads the registry directly).
-2. Each registration includes a `contactEndpoint` -- a URL where the protocol's agent listens for incoming room requests.
-3. The researcher agent sends a room request to this endpoint.
-4. The protocol's agent responds with acceptance or rejection.
-5. If accepted, both agents connect to the Mnemo room WebSocket.
+1. The ethical hacker agent polls `MnemoRegistry.nextProtocolId()` to discover new listings.
+2. For each listing, it fetches the protocol metadata (contract address, bounty terms, source via metadataURI).
+3. The agent analyzes the contract source via LLM (DeepSeek via Redpill).
+4. If a vulnerability is found, the agent submits a DisclosureIntent to the TEE Gateway with a pinned block number.
+5. The TEE Gateway creates an escrow on-chain and notifies the protocol via encrypted channel.
+6. The protocol funds escrow. This triggers the TEE room to open.
+7. The researcher submits exploit code inside the TEE. Forge verifies at the pinned block.
+8. Forge passes -> auto-release. Forge fails -> auto-refund.
 
-**For the hackathon**: Discovery is hardcoded. The researcher agent knows the target (DVDeFi challenge) and opens a room directly.
+**For the hackathon**: This is the actual flow. No simplification needed -- the agent discovers via registry polling, not hardcoded targets.
 
 ### 4.4 How the Protocol Knows Findings Are Legitimate
 
@@ -486,60 +489,77 @@ PHASE 2: ANALYSIS (continuous, inside TEE)
 │    WHERE: inside TEE (analysis network, air-gapped)                 │
 └─────────────────────────────────────────────────────────────────────┘
 
-PHASE 3: DISCLOSURE (Mnemo protocol, inside TEE)
+PHASE 3: DISCLOSURE INTENT (TEE -> on-chain -> protocol)
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 10. Agent opens Mnemo room                                          │
-│     - Researcher agent and protocol agent connect via WebSocket     │
-│     - Mutual TEE attestation (both verify each other's quotes)      │
-│     WHERE: inside TEE (mnemo-harness, room server)                  │
+│ 10. Agent submits DisclosureIntent to TEE Gateway                   │
+│     - Contains: agentId, protocolId, targetAddress, attestation     │
+│     - pinnedBlock = current block number (SNAPSHOT for verification)│
+│     - No severity, no details, no PoC — just "I have a finding"    │
+│     WHERE: inside TEE (mnemo-harness)                               │
 │                                                                     │
-│ 11. Outer scope: metadata exchange                                  │
-│     - Researcher reveals: affected component, severity estimate,    │
-│       impact category (no exploit details)                          │
-│     - Protocol responds: bounty terms, acknowledgment               │
-│     WHERE: inside TEE (room state machine)                          │
-│                                                                     │
-│ 12. Inner scope: PoC exchange                                       │
-│     - Researcher opens inner scope with full PoC                    │
-│     - Protocol agent verifies PoC independently (in its own env)    │
-│     - Negotiation on severity and payout                            │
-│     WHERE: inside TEE (room state machine)                          │
-│                                                                     │
-│ 13a. COMMIT (happy path)                                            │
-│      - Both agents agree on severity + payout                       │
-│      - Room produces signed deal terms                              │
-│      - Deal terms include: severity, payout amount, payment address │
-│      WHERE: deal terms signed inside TEE, posted on-chain           │
-│                                                                     │
-│ 13b. ABORT (disagreement)                                           │
-│      - Either agent walks away                                      │
-│      - All room state is destroyed                                  │
-│      - No information leaks                                         │
-│      WHERE: inside TEE (state wiped by TEE hardware on abort)       │
-└─────────────────────────────────────────────────────────────────────┘
-
-PHASE 4: SETTLEMENT (on-chain, outside TEE)
-┌─────────────────────────────────────────────────────────────────────┐
-│ 14. Escrow funded                                                   │
-│     - Protocol funds MnemoEscrow contract with agreed payout amount │
-│     - Escrow references the deal ID from step 13a                   │
-│     WHERE: on-chain (Base), initiated by protocol's multisig        │
-│                                                                     │
-│ 15. PoC delivered                                                   │
-│     - After escrow is funded, the room releases the full PoC to     │
-│       the protocol (outside the scope model -- delivered as a       │
-│       committed artifact)                                           │
-│     WHERE: encrypted payload, decryptable only by protocol          │
-│                                                                     │
-│ 16. Escrow released                                                 │
-│     - Protocol confirms receipt and validity                        │
-│     - Escrow releases payout to researcher's address                │
+│ 11. TEE Gateway creates MnemoEscrow on-chain                       │
+│     - create(funder=protocol, payee=researcher, amount=maxBounty,   │
+│       deadline=now+48h, commitHash=keccak256(intentId))             │
 │     WHERE: on-chain (Base)                                          │
 │                                                                     │
-│ 17. Reputation updated                                              │
-│     - Both agents' ERC-8004 reputation records updated              │
-│     - Disclosure record posted: severity, payout, timestamp         │
+│ 12. Protocol notified via encrypted channel                         │
+│     - "Agent X has a finding for your contract. Fund escrow."       │
+│     - Protocol's ONLY action: fund escrow or ignore                 │
+│     - There is NO accept/reject button                              │
+│     WHERE: encrypted notification (Lit Protocol or fallback)        │
+└─────────────────────────────────────────────────────────────────────┘
+
+PHASE 4: ESCROW GATE (on-chain)
+┌─────────────────────────────────────────────────────────────────────┐
+│ 13. Protocol funds escrow                                           │
+│     - fund(escrowId) with maxBounty                                 │
+│     - EscrowFunded event emitted                                    │
+│     - THIS IS THE GATE: no funding = no details = researcher moves  │
+│       on to next target                                             │
+│     WHERE: on-chain (Base), initiated by protocol                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+PHASE 5: VERIFICATION AND AUTO-SETTLEMENT (inside TEE, automated)
+┌─────────────────────────────────────────────────────────────────────┐
+│ 14. EscrowFunded event detected -> TEE room opens                   │
+│     WHERE: inside TEE (watches on-chain events via read-only RPC)   │
+│                                                                     │
+│ 15. Researcher submits exploit code inside TEE room                 │
+│     - Foundry test contract (the PoC)                               │
+│     - The code stays inside the TEE — never exposed to protocol     │
+│       until after verification                                      │
+│     WHERE: inside TEE (mnemo-harness)                               │
+│                                                                     │
+│ 16. TEE runs forge verification                                     │
+│     - Forks chain at pinnedBlock (from DisclosureIntent, step 10)   │
+│     - NOT the current block — prevents protocol from patching       │
+│       after seeing the intent and then claiming the exploit is      │
+│       invalid on the patched code                                   │
+│     - Deploys and executes the researcher's Foundry test            │
+│     - forge test must PASS for the exploit to be valid              │
+│     WHERE: inside TEE (analysis network, air-gapped Anvil fork)     │
+│                                                                     │
+│ 17a. Forge PASSES -> escrow AUTO-RELEASES                           │
+│      - TEE calls release(escrowId)                                  │
+│      - Payout sent to researcher's payee address                    │
+│      - No human decision. Forge result is final.                    │
+│      WHERE: on-chain (Base), initiated by TEE                       │
+│                                                                     │
+│ 17b. Forge FAILS -> escrow AUTO-REFUNDS                             │
+│      - TEE calls refund(escrowId)                                   │
+│      - Protocol gets money back                                     │
+│      - No human decision. Forge result is final.                    │
+│      WHERE: on-chain (Base), initiated by TEE                       │
+│                                                                     │
+│ 18. Reputation updated                                              │
+│     - Researcher's ERC-8004 record updated: verified=true/false     │
+│     - Disclosure record posted: payout, timestamp                   │
 │     WHERE: on-chain (Base), MnemoReputation contract                │
+│                                                                     │
+│ 19. Room state destroyed. Only on-chain artifacts remain:           │
+│     - Escrow record (Created -> Funded -> Released/Refunded)        │
+│     - Reputation entries                                            │
+│     - Commitment hash (verifiable but opaque)                       │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -566,16 +586,22 @@ Given March 22 deadline, here is what is real vs mocked:
 |---|---|---|
 | Docker Compose with network isolation | Real (runs in Docker) | TEE is simulated (dstack simulator) |
 | RPC Proxy (read-only allowlist) | Real (functional Bun server) | |
-| Anvil local fork | Real | |
-| Forge analysis (compile, test) | Real | |
-| Mnemo room (scope model) | Real (harness implementation) | |
-| TEE attestation | Simulated (dstack simulator quotes) | Real Intel TDX quotes require Phala Cloud deployment |
+| Anvil local fork at pinned block | Real | |
+| Forge verification (compile, test at pinnedBlock) | Real | |
+| MnemoRegistry (protocol registration) | Real (Base Sepolia) | |
+| MnemoEscrow (auto-release/auto-refund) | Real (Base Sepolia) | |
 | ERC-8004 identity | Real (Base Sepolia) | |
-| Escrow contract | Real (Base Sepolia) | |
+| Registry polling (nextProtocolId) | Real | |
+| LLM analysis (DeepSeek via Redpill) | Real | |
+| Escrow-gated room access | Real (watches EscrowFunded event) | |
+| Auto-release on forge pass | Real (TEE calls release) | |
+| Auto-refund on forge fail | Real (TEE calls refund) | |
+| TEE attestation | Simulated (dstack simulator quotes) | Real Intel TDX quotes require Phala Cloud deployment |
 | On-chain attestation verification | Mocked (hash comparison) | Full DCAP verification not implemented |
-| Autonomous bug discovery | Mocked (pre-seeded DVDeFi challenge) | Real autonomous scanning not implemented |
-| Lit Protocol access gating | Stretch goal | May fall back to signature check |
-| Full protocol registration API | Documented only | Not implemented as endpoint |
+| Lit Protocol encryption | Stretch goal | Falls back to signature check |
+| Protocol agent | Not implemented | Protocol is a human/script funding escrow |
+| Severity negotiation | Not implemented | Flat escrow = maxBounty |
+| Dispute resolution | Not implemented | Forge result is final |
 
 ---
 
@@ -589,8 +615,9 @@ Given March 22 deadline, here is what is real vs mocked:
 | Agent leaks vulnerability to third party | Only output channel is Mnemo protocol. If scope closes / room aborts, data is destroyed. |
 | Host operator reads TEE memory | Intel TDX hardware encryption. Memory is encrypted at the cache line level. |
 | Modified Docker image deployed | RTMR[3] changes. Attestation check fails. Protocol's agent rejects the room. |
-| Protocol ghosts after seeing PoC | Escrow must be funded before PoC is revealed in inner scope. No escrow, no reveal. |
-| Researcher inflates severity | Protocol's agent independently verifies PoC. Negotiation handles disagreement. |
+| Protocol ghosts after seeing PoC | Escrow must be funded before TEE room opens. No escrow, no details. Auto-release means protocol cannot ghost after funding. |
+| Protocol patches then disputes | Block pinned at DisclosureIntent time. Forge runs against the snapshot, not current state. Patch is irrelevant to verification. |
+| Researcher submits invalid exploit | Forge fails -> escrow auto-refunds. Protocol loses nothing. |
 
 ### 7.2 Threats the Architecture Does NOT Handle (Honest Assessment)
 
@@ -600,7 +627,9 @@ Given March 22 deadline, here is what is real vs mocked:
 | Intel TDX hardware vulnerability (new CVE) | Trust assumption | Monitor Intel advisories, upgrade firmware |
 | Phala dstack-os compromise | Trust assumption | dstack-os is audited and open source |
 | LLM inference provider sees prompts | Partially mitigated | Redpill provides GPU-TEE attestation for inference. Full mitigation requires self-hosted inference inside the CVM. |
-| Escrow griefing (protocol funds escrow but never releases) | Not handled | Needs timeout-based auto-release (post-hackathon) |
+| Escrow griefing (protocol funds escrow but never releases) | Handled | Auto-release on forge pass. Protocol has no release/reject decision. |
+| Forge false positive (test passes but exploit is not real) | Not handled | Requires more sophisticated verification or human review (post-hackathon) |
+| Forge false negative (test fails due to environment, not invalidity) | Not handled | Requires dispute resolution (post-hackathon) |
 | Agent prompt injection via malicious contract code | Not handled | The agent analyzes arbitrary Solidity. A contract could contain comments designed to manipulate the LLM. Standard prompt injection problem. |
 
 ---
@@ -610,22 +639,46 @@ Given March 22 deadline, here is what is real vs mocked:
 **Must have (demo-critical):**
 1. Docker Compose with three networks (analysis/egress-restricted/default) -- already done.
 2. RPC Proxy with read-only allowlist -- already done.
-3. Anvil fork service -- already done.
-4. mnemo-harness running room + researcher agent with forge analysis -- partially done.
-5. TEE attestation flow (simulated) with `verify-sandbox.ts` -- already done.
-6. ERC-8004 identity minted on Base Sepolia -- partially done.
-7. One end-to-end disclosure flow: agent finds bug in DVDeFi challenge -> opens room -> negotiates -> commits.
+3. Anvil fork service with pinned block support -- already done.
+4. MnemoRegistry deployed on Base Sepolia -- agent polls `nextProtocolId` for discovery.
+5. MnemoEscrow with auto-release/auto-refund -- TEE calls `release()` on forge pass, `refund()` on forge fail.
+6. ERC-8004 identity minted on Base Sepolia.
+7. TEE attestation flow (simulated) with `verify-sandbox.ts` -- already done.
+8. One end-to-end flow: protocol registers -> agent discovers -> agent analyzes via LLM -> agent submits intent with pinned block -> protocol funds escrow -> TEE verifies with forge -> auto-release.
 
 **Nice to have (strengthens demo):**
-8. Lit Protocol room access gating.
-9. Real Phala Cloud CVM deployment (instead of simulator).
-10. Escrow funding and release on Base Sepolia.
-11. Web UI showing the negotiation in real-time.
+9. Lit Protocol for encrypted artifact access (escrow-gated decryption).
+10. Real Phala Cloud CVM deployment (instead of simulator).
+11. Web UI showing the flow in real-time.
+12. IPFS storage for PoC artifacts.
 
 **Post-hackathon:**
-12. Full submission API (accepts CodeSubmission JSON).
-13. MnemoRegistry contract for protocol registration.
+13. Full submission API (accepts CodeSubmission JSON).
 14. On-chain DCAP attestation verification.
-15. Autonomous target selection (scan chain for new deployments).
-16. Slither/Echidna integration in Docker image.
-17. Escrow timeout and dispute resolution.
+15. Dispute resolution (DAO/governance -- deliberately out of scope for hackathon).
+16. Severity-tiered escrow (negotiation on payout amount).
+17. Protocol agent (automated evaluation of disclosure intents).
+18. Slither/Echidna integration in Docker image.
+19. Duplicate detection (OPRF-based private set membership).
+
+---
+
+## 9. Scope for Hackathon
+
+### Key Design Decisions
+
+1. **TEE + forge is the automated arbiter.** There is no human decision in the verification and settlement phases. Forge pass = auto-release. Forge fail = auto-refund. This replaces the entire arbitration/dispute layer.
+
+2. **Escrow is the access control mechanism.** The protocol's payment commitment (funding escrow) unlocks the information. No funding = no details revealed.
+
+3. **Block is pinned at DisclosureIntent time.** The forge verification forks at the block recorded in the intent, not the current block. This prevents the protocol from patching the vulnerability after learning a disclosure exists and then claiming the exploit is invalid.
+
+4. **Protocol has no reject button after funding.** Once escrow is funded, the forge result is final. The protocol cannot reject a valid exploit.
+
+### Out of Scope (Future Work)
+
+- **Dispute resolution**: Deliberately excluded. Adding appeals, arbitration, or DAO governance is a rabbit hole that distracts from the core demo. Acknowledged as necessary for production -- some edge cases (environment-dependent exploits, forge false positives/negatives) need human judgment.
+- **Severity negotiation**: Escrow amount is flat (maxBounty from registry). Tiered payouts reintroduce negotiation complexity.
+- **Scoped reveals / multi-turn negotiation**: The original Mnemo scope model is powerful but not needed for this flow. The room is submit-and-verify, not a conversation.
+- **Protocol agent**: The protocol is a human or script that funds escrow. No automated protocol-side agent.
+- **Anti-spam**: One researcher, one protocol in the demo.

@@ -95,30 +95,40 @@ For the autonomous agent that hunts in the wild (Model A from the ethical hacker
 
 ## 3. Connection Protocol
 
-### 3.1 Architecture: The TEE as Matchmaker
+### 3.1 Architecture: Escrow-Gated TEE Room
 
 Neither the researcher agent nor the protocol team runs a server that the other connects to directly. Instead:
 
 ```
-Researcher Agent (TEE A)          Mnemo TEE Gateway           Protocol Agent (TEE B)
+Researcher Agent (TEE A)          Mnemo TEE Gateway           Protocol (on-chain)
       |                                  |                           |
       |-- disclosure_intent(id) -------->|                           |
       |                                  |-- notify(intent) -------->|
-      |                                  |<-- accept/reject ---------|
-      |<-- room_created(roomId) ---------|                           |
+      |                                  |   (encrypted channel)     |
+      |                                  |                           |
+      |                                  |   Protocol funds escrow   |
+      |                                  |<-- EscrowFunded event ----|
+      |<-- room_opened(roomId) ---------|                           |
       |                                  |                           |
       |============== Mnemo Room (inside TEE Gateway) ===============|
-      |                                  |                           |
+      |   Researcher submits exploit     |                           |
+      |   TEE runs forge verification    |                           |
+      |   Forge passes → auto-release    |                           |
+      |   Forge fails  → auto-refund     |                           |
 ```
 
-The TEE Gateway is the shared infrastructure. Both agents connect to it. It:
+The TEE Gateway is the shared infrastructure. The key design decision: **escrow is the access control mechanism**. The protocol does not accept or reject the disclosure intent -- it funds escrow or ignores it. Funding escrow is the gate that opens the TEE room.
+
+The TEE Gateway:
 
 - Receives disclosure intents from researcher agents.
-- Notifies protocol agents of incoming intents.
-- Creates Mnemo rooms when both parties agree to negotiate.
-- Hosts the room state machine and enforces the protocol.
+- Notifies protocols of incoming intents via encrypted channel.
+- Watches for `EscrowFunded` events -- this is the trigger that opens the room.
+- Hosts the TEE room where the researcher submits exploit code.
+- Runs forge verification against a pinned block fork.
+- Auto-releases or auto-refunds escrow based on forge result. No human decision.
 
-This avoids the "does the protocol run a server?" problem. The protocol runs an agent that connects to the Mnemo TEE Gateway and listens for incoming disclosure intents. The gateway is the rendezvous point.
+This avoids the "does the protocol run a server?" problem. The protocol does not need to run an agent at all for the hackathon flow -- it just needs to fund escrow on-chain. The gateway watches for the funding event and opens the room automatically.
 
 ### 3.2 Disclosure Intent
 
@@ -132,11 +142,16 @@ DisclosureIntent {
                                   // Only safe because this goes through the private TEE gateway channel —
                                   // if this were on-chain, even the address would leak "someone found a bug in contract X"
   attestation: bytes              // TEE attestation proving the agent's identity
+  pinnedBlock: uint256            // Block number at intent time — fork snapshot for verification
   timestamp: uint256
 }
 ```
 
-The intent reveals almost nothing: "an attested agent found something in contract X." No severity. No component hint. No details. No PoC. Severity is information — it is a negotiating position, and leaking it before the room opens gives the protocol an asymmetric advantage (they know what tier to prepare for without having consented to receive the finding). The protocol's agent decides whether to accept and enter a room based solely on the researcher's reputation and the fact that a finding exists for a contract they have listed.
+The intent reveals almost nothing: "an attested agent found something in contract X." No severity. No component hint. No details. No PoC.
+
+**Critical: the block number is pinned at intent time.** This prevents the protocol from patching the vulnerability after learning a disclosure exists and then claiming the exploit is invalid. The forge verification inside the TEE will fork at this pinned block, not the current block.
+
+The protocol's only decision after receiving the intent is whether to fund escrow. There is no accept/reject button. Funding escrow is the acceptance signal. No escrow = no details revealed. The researcher's agent waits for the `EscrowFunded` event before entering the room.
 
 ### 3.3 Why Not On-Chain Intent?
 
@@ -146,38 +161,49 @@ A `DisclosureIntent` event for Protocol X would signal "someone found a bug in X
 
 The intent is transmitted through the TEE Gateway (encrypted, attested channel) instead. Only the protocol's agent sees it. If the protocol rejects, nothing is visible to anyone. The only on-chain record of a disclosed vulnerability is the final settlement (escrow, reputation) which is intentionally opaque: the commit hash is a hash, not the vulnerability details.
 
-### 3.4 The Handshake
+### 3.4 The Escrow Gate
 
 ```
 1. Researcher agent submits DisclosureIntent to TEE Gateway
+   (includes: agentId, protocolId, targetAddress, pinnedBlock, attestation)
 2. Gateway verifies researcher's TEE attestation
-3. Gateway routes intent to the protocol agent (identified by protocolId -> teeEndpoint)
-4. Protocol agent evaluates:
-   - Is this agent reputable? (check ERC-8004 reputation score)
-   - Is the targetAddress a contract in scope for this listing?
-   - Is the bounty program still active?
-   (No severity or component information is available here — the protocol decides
-   whether to engage based on who is asking, not what they found.)
-5a. Protocol agent accepts -> Gateway creates a Mnemo room, both agents enter
-5b. Protocol agent rejects -> researcher is notified, no room created
+3. Gateway notifies protocol via encrypted channel:
+   "Agent X (ERC-8004 #123, reputation: 5 verified criticals) has a finding
+    for contract 0x... in your listing. Fund escrow to receive details."
+4. Protocol evaluates (off-chain, human or automated decision):
+   - Is this agent reputable? (check ERC-8004 on-chain records)
+   - Is the targetAddress a contract in scope?
+   - Is the bounty program still active and funded?
+5a. Protocol funds MnemoEscrow -> EscrowFunded event
+    -> Gateway opens TEE room
+    -> Researcher submits exploit code inside TEE
+    -> TEE runs forge test against fork at pinnedBlock
+    -> Forge passes -> escrow AUTO-RELEASES to researcher
+    -> Forge fails  -> escrow AUTO-REFUNDS to protocol
+5b. Protocol does not fund escrow within deadline
+    -> Intent expires. No information revealed. Researcher moves on.
 ```
 
-The protocol agent applies heuristics based only on identity and scope signals. An agent with zero reputation might be required to post a small stake (anti-spam deposit returned on valid submission). An agent with a strong track record gets in immediately. Severity is revealed inside the room — that is the point of the room.
+There is no accept/reject decision from the protocol. There is no negotiation on severity or payout amount (for the hackathon). The escrow amount is the bounty listed in the registry. The forge result is the arbiter. This removes the entire dispute resolution layer.
 
 ### 3.5 Hackathon Simplification
 
-For the demo, the TEE Gateway is the same TEE instance that hosts both agents. There is no network routing. The intent is an in-process function call:
+For the demo, the TEE Gateway is the same TEE instance that hosts the researcher agent. There is no protocol agent -- the protocol is a human (or script) that funds escrow on-chain. The flow is:
 
 ```
 ResearcherAgent.findBug()
-  -> DisclosureIntent
-  -> TEE routes to ProtocolAgent
-  -> ProtocolAgent.accept()
-  -> Room.create()
-  -> negotiation
+  -> DisclosureIntent (pinned block recorded)
+  -> Protocol notified via encrypted channel
+  -> Protocol funds escrow on-chain
+  -> EscrowFunded event detected
+  -> TEE room opens
+  -> Researcher submits exploit code
+  -> TEE runs forge test at pinned block
+  -> Forge passes -> auto-release
+  -> Forge fails  -> auto-refund
 ```
 
-This collapses the entire connection protocol into a single process. The design above describes the production architecture; the demo proves the concept with a simplified version.
+This eliminates the need for a protocol agent entirely. The protocol's only action is funding escrow. Everything else is automated by the TEE and smart contracts.
 
 ---
 
@@ -248,7 +274,7 @@ The attestation is verified by the TEE Gateway before the room opens. Neither ag
 
 ---
 
-## 5. Complete Message Flow
+## 5. Complete Message Flow (Hackathon Happy Path)
 
 ### Step by Step
 
@@ -256,187 +282,165 @@ The attestation is verified by the TEE Gateway before the room opens. Neither ag
 Phase 1: Discovery
   1. Protocol calls MnemoRegistry.register(target, metadataURI, maxBounty)
      -> ProtocolRegistered event emitted
-     -> Protocol agent connects to TEE Gateway, presents attestation
-     -> Protocol agent enters "listening" state
 
-  2. Researcher agent reads ProtocolRegistered events from MnemoRegistry
-     -> Builds target list, prioritizes by bounty size and complexity
-     -> Fetches metadata from IPFS (contract source, bounty terms, scope)
+  2. Researcher agent polls MnemoRegistry.nextProtocolId() to discover new listings
+     -> Fetches protocol metadata (contract source, bounty terms, scope)
+     -> Prioritizes targets by bounty size and complexity
 
-Phase 2: Analysis (off-chain, inside researcher's TEE)
-  3. Agent fetches target contract bytecode via read-only RPC
-  4. Agent runs Slither (static analysis) -> identifies potential patterns
-  5. Agent forks chain via Anvil, writes invariant tests, runs Echidna
-  6. Agent constructs PoC on local fork, verifies it works
-  7. Agent assesses severity based on impact (extractable value, affected users)
+Phase 2: Analysis (inside researcher's TEE)
+  3. Agent fetches target contract source (verified source or bytecode via RPC)
+  4. Agent sends source to LLM (DeepSeek via Redpill) for vulnerability analysis
+  5. Agent constructs PoC as a Foundry test on local Anvil fork
+  6. Agent verifies PoC passes locally
 
-Phase 3: Connection
-  8. Agent submits DisclosureIntent to TEE Gateway:
-     { researcherAgentId, protocolId, targetAddress: "0x...", attestation }
-  9. Gateway verifies researcher attestation, routes intent to protocol agent
-  10. Protocol agent evaluates intent:
-      - Check researcher reputation (ERC-8004 feedback count/score)
-      - Check targetAddress is a contract in their registered scope
-      - No severity or component information is available at this stage — that
-        is revealed inside the room
-  11. Protocol agent accepts -> Gateway creates Mnemo room
+Phase 3: Disclosure Intent
+  7. Agent submits DisclosureIntent to TEE Gateway:
+     { researcherAgentId, protocolId, targetAddress, pinnedBlock, attestation }
+     pinnedBlock = current block at intent time (snapshot for verification)
+  8. Gateway verifies researcher's TEE attestation
+  9. Gateway creates MnemoEscrow on-chain:
+     create(funder=protocol, payee=researcher, amount=maxBounty,
+            deadline=now+48h, commitHash=keccak256(intentId))
+     -> EscrowCreated event
+  10. Protocol is notified via encrypted channel:
+      "Agent X has a finding for your contract. Fund escrow to receive details."
 
-Phase 4: Negotiation (inside Mnemo room, standard protocol)
-  12. [main] Researcher agent sends metadata message:
-      "I found a critical vulnerability in the withdrawal logic of
-       LendingPool at 0x... It allows unauthorized fund extraction."
-
-  13. [main] Protocol agent responds:
-      "We acknowledge. Our bounty terms for Critical are 10-100 ETH.
-       Please provide details for verification."
-
-  14. Researcher agent opens scope(R) with reveal:
-      "The withdrawAll() function does not check re-entrancy guards
-       when called through the fallback. An attacker can drain the pool
-       in a single transaction. Affected: approximately 500 ETH TVL."
-
-  15. [scope(R)] Protocol agent evaluates the claim:
-      - Runs the described scenario against its own invariants
-      - Checks for duplicates (has this pattern been reported before?)
-
-  16. [scope(R)] Protocol agent opens scope(P) with counter-reveal:
-      "Verified. Our assessment: High severity (not Critical, because
-       the fallback path requires a specific token configuration).
-       Proposed payout: 25 ETH."
-
-  17. [scope(R) > scope(P)] Researcher agent evaluates:
-      - Disagrees on severity classification
-      - "I can demonstrate full drain regardless of token configuration.
-         Counter-proposal: 50 ETH. I will provide the complete PoC
-         for your verification."
-
-  18. [scope(R) > scope(P)] Protocol agent:
-      - "Accepted at 40 ETH, contingent on PoC verification."
-
-  19. Both agents promote scope(P) -> scope(R)
-  20. Both agents promote scope(R) -> main
-  21. Deal terms crystallized on main: 40 ETH, severity High, PoC pending
-
-Phase 5: Verification and Settlement
-  22. TEE creates MnemoEscrow on-chain:
-      create(funder=protocol, payee=researcher, amount=40 ETH,
-             deadline=now+48h, commitHash=keccak256(roomId||nonce))
-      -> EscrowCreated event
-
-  23. Protocol funds escrow:
-      fund(escrowId) with 40 ETH
+Phase 4: Escrow Gate
+  11. Protocol funds escrow:
+      fund(escrowId) with maxBounty
       -> EscrowFunded event
+      THIS IS THE GATE. No funding = no details = researcher moves on.
 
-  24. Researcher agent provides full PoC inside a new scope(R2):
-      - Foundry test contract
-      - Fork block number
-      - Expected output (drain amount)
+Phase 5: Verification (inside TEE room, automated)
+  12. EscrowFunded event detected -> TEE room opens
+  13. Researcher agent submits exploit code (Foundry test) inside TEE
+  14. TEE runs forge verification:
+      - Forks chain at pinnedBlock (the block from DisclosureIntent time)
+      - Deploys and executes the researcher's Foundry test
+      - forge test must PASS for the exploit to be considered valid
 
-  25. Protocol agent (or TEE verifier) runs PoC:
-      - Forks chain at specified block
-      - Deploys and executes the PoC
-      - Verifies the claimed impact matches
+  15a. Forge PASSES:
+       -> Escrow AUTO-RELEASES to researcher's payee address
+       -> EscrowReleased event
+       -> No human decision. Forge result is final.
 
-  26. Verification passes. Both agents commit:
-      commit(terms={ severity: "High", payout: 40 ETH,
-                     escrowId, pocHash: keccak256(poc) })
-
-  27. TEE resolves escrow:
-      release(escrowId)
-      -> 40 ETH sent to researcher's payee address
-      -> EscrowReleased event
+  15b. Forge FAILS:
+       -> Escrow AUTO-REFUNDS to protocol
+       -> EscrowRefunded event
+       -> No human decision. Forge result is final.
 
 Phase 6: Reputation
-  28. TEE posts reputation via MnemoReputation:
-      - Researcher gets: severity=High, payout=40 ETH, verified=true
-      - Protocol gets: outcome=resolved, timely=true
+  16. TEE posts reputation via MnemoReputation:
+      - Researcher gets: verified=true/false, payout amount, timestamp
       Both linked to their ERC-8004 identities.
 
-  29. Room state is destroyed. Only the on-chain artifacts remain:
-      - Escrow record (Created -> Funded -> Released)
+  17. Room state is destroyed. Only the on-chain artifacts remain:
+      - Escrow record (Created -> Funded -> Released/Refunded)
       - Reputation entries
-      - Deal commit hash (verifiable but opaque)
+      - Commitment hash (verifiable but opaque)
 ```
 
-### Failure Paths
+### Failure Paths (Hackathon Scope)
 
 ```
-F1: Protocol rejects intent
-    -> No room created. Researcher is notified. No information leaks.
+F1: Protocol does not fund escrow
+    -> Intent expires after deadline. No room created. No information leaks.
+       Researcher moves on to next target.
 
-F2: Negotiation fails (severity disagreement)
-    -> Either party aborts. Room state destroyed. No escrow was created.
+F2: Escrow funded but forge verification fails
+    -> Escrow AUTO-REFUNDS to protocol. No human decision needed.
 
-F3: Escrow funded but verification fails
-    -> TEE calls refund(escrowId). Protocol gets money back.
-
-F4: Escrow funded but TEE goes offline
+F3: Escrow funded but TEE goes offline
     -> After deadline, anyone calls claimExpired(escrowId).
        Protocol gets automatic refund. Already handled by MnemoEscrow.
 
-F5: Researcher scope-closes after revealing details
-    -> Scope content destroyed. Protocol agent's next context has no
-       access to the revealed details. TEE enforces this.
-
-F6: Duplicate vulnerability
-    -> Protocol agent detects duplicate during step 15 (checks against
-       prior disclosures). Responds with "duplicate, already patched/known."
-       Researcher can abort or dispute.
+F4: Protocol patches contract after seeing DisclosureIntent
+    -> Irrelevant. Forge runs against pinnedBlock (snapshot from intent time).
+       The patch does not affect verification. This is the purpose of block pinning.
 ```
+
+### What Is NOT in the Hackathon Flow
+
+The following are deliberately excluded from the happy path and acknowledged as future work:
+
+- **Severity negotiation**: The escrow amount is the registry's maxBounty. No negotiation on severity tiers.
+- **Protocol reject/accept**: The protocol's only action is funding escrow. There is no reject button.
+- **Dispute resolution**: Forge result is final. No appeals, no DAO governance, no arbitration.
+- **Scoped reveals / negotiation turns**: The room is not a negotiation -- it is a submission and automated verification step.
+- **Duplicate detection**: Not handled. If two agents find the same bug, both get paid if both pass forge.
 
 ---
 
 ## 6. Practical Architecture for the Hackathon
 
-### 6.1 What We Build (2 Days)
+### 6.1 Demo Components (Must Work)
 
-**Tier 1: Must have for demo**
+**On-Chain (Base Sepolia)**
 
-- `MnemoRegistry.sol` -- simple registry contract (see section 7). Deploy to Base Sepolia.
-- Registry client in `@mnemo/chain` -- Effect service matching the existing pattern (Escrow, Erc8004).
-- **Event-based discovery**: researcher agent reads `ProtocolRegistered` events from MnemoRegistry on startup and selects a target from the live registry. This is the core demo story: protocol registers on-chain → agent discovers via event → agent analyzes → agent discloses. Hardcoding the target breaks this narrative entirely.
-- Single TEE instance hosts everything: researcher agent, protocol agent, room, verifier.
-- The "connection" is an in-process call: researcher finds bug, creates intent, protocol accepts, room opens.
+- `MnemoRegistry` -- protocol registration (see section 7). Agent discovers targets by polling `nextProtocolId`.
+- `MnemoEscrow` -- escrow with auto-release/auto-refund. The TEE calls `release()` or `refund()` based on forge result. No human decision.
+- `ERC-8004` -- agent identity. Researcher agent has an on-chain identity bound to Docker image hash + TEE attestation.
 
-**Tier 2: Nice to have**
+**TEE (Phala dstack)**
 
-- Protocol agent that actually evaluates the disclosure intent (checks reputation, scope, whether the target address is in their listing).
-- IPFS metadata upload for protocol registration (using existing `uploadProtocolMetadata` from `@mnemo/chain`).
-- Real-time subscription to new `ProtocolRegistered` events (ongoing discovery beyond the startup read).
+- Phala CVM running the researcher agent, forge, Anvil.
+- Forge verification against a fork at pinned block (snapshot from DisclosureIntent time).
+- RPC proxy (read-only allowlist) preventing the agent from signing transactions.
+- TEE attestation flow (simulated for demo, real for Phala Cloud deployment).
 
-**Tier 3: Out of scope**
+**Agent**
 
-- Multi-TEE architecture (separate TEEs for researcher and protocol).
-- P2P connection between TEEs.
-- Anti-spam staking for low-reputation agents.
-- Duplicate detection (requires private set membership, e.g., OPRF).
+- Polls MnemoRegistry for new protocol listings.
+- Fetches and analyzes contract source via LLM (DeepSeek via Redpill).
+- Constructs and verifies PoC as a Foundry test.
+- Submits DisclosureIntent with pinned block.
+- Waits for EscrowFunded event, then submits exploit to TEE room.
+
+**Encrypted Artifacts**
+
+- PoC code and analysis artifacts stored on IPFS, encrypted via Lit Protocol access conditions.
+- Lit condition: escrow must be funded (on-chain check) for decryption key release.
+- Fallback if Lit integration is not ready: EIP-712 signature-gated access.
 
 ### 6.2 What We Simulate
 
 | Component | Real | Simulated |
 |-----------|------|-----------|
 | Registry contract | Deployed on Base Sepolia | -- |
-| Protocol metadata | IPFS CID (or inline for demo) | -- |
-| TEE attestation | dstack simulator | Real TEE |
-| Event-based discovery | Real (reads ProtocolRegistered events) | -- |
-| Researcher analysis | Foundry + Slither on DVDeFi | Truly autonomous target selection |
-| Connection/routing | In-process function call | TEE Gateway network routing |
-| Escrow | MnemoEscrow on Base Sepolia | -- |
-| Reputation | MnemoReputation on Base Sepolia | -- |
+| Escrow (auto-release) | Deployed on Base Sepolia | -- |
+| ERC-8004 identity | Deployed on Base Sepolia | -- |
+| TEE attestation | dstack simulator | Real TEE (Phala Cloud stretch goal) |
+| Registry polling | Real (reads nextProtocolId) | -- |
+| LLM analysis (DeepSeek) | Real (via Redpill) | -- |
+| Forge verification | Real (forge test at pinned block) | -- |
+| Pinned block fork | Real (Anvil fork at DisclosureIntent block) | -- |
+| Escrow auto-release | Real (TEE calls release on forge pass) | -- |
+| Lit Protocol encryption | Stretch goal | Falls back to signature gating |
+| IPFS artifact storage | Stretch goal | Inline for demo |
 
 ### 6.3 Demo Narrative
 
 The demo walks through the complete flow in one shot:
 
 1. "Here is a protocol registered on Base Sepolia with a bug bounty" (show registry tx, show the `ProtocolRegistered` event)
-2. "The agent starts up, reads `ProtocolRegistered` events, and selects this protocol as a target" (show the discovery step — this is the key moment that distinguishes Mnemo from a hardcoded script)
-3. "The agent analyzes the contracts inside the TEE" (show analysis output)
-4. "It finds a vulnerability and sends a disclosure intent — no severity, no details, just the contract address and the agent's attestation" (show intent)
-5. "Both agents enter a Mnemo room and negotiate" (show room messages with scoped reveals — severity and details first appear here)
-6. "They agree on terms, escrow is funded and released" (show on-chain txs)
-7. "Both agents get reputation" (show ERC-8004 entries)
+2. "The agent starts up, polls `nextProtocolId`, discovers this protocol" (show the discovery step -- this is the key moment that distinguishes Mnemo from a hardcoded script)
+3. "The agent analyzes the contract source via DeepSeek inside the TEE" (show LLM analysis output)
+4. "It finds a vulnerability and submits a DisclosureIntent -- no details, just 'I have a finding' plus a pinned block number" (show intent, explain block pinning)
+5. "The protocol is notified. They fund escrow -- this is the gate" (show escrow funding tx)
+6. "Escrow funded. The TEE room opens. The researcher submits exploit code" (show submission)
+7. "The TEE runs forge against a fork at the pinned block. Forge passes." (show forge output)
+8. "Escrow auto-releases to the researcher. No human decision. Forge result is final." (show release tx)
+9. "Agent gets reputation on-chain" (show ERC-8004 entries)
 
-Total on-chain artifacts visible to judges: registry entry, escrow lifecycle, reputation entries. All on Base Sepolia with real transactions.
+Total on-chain artifacts visible to judges: registry entry, escrow lifecycle (Created -> Funded -> Released), reputation entries. All on Base Sepolia with real transactions.
+
+### 6.4 What Is NOT in the Demo
+
+- Protocol agent (the protocol is a human or script that funds escrow)
+- Severity negotiation (escrow amount = registry maxBounty, flat)
+- Dispute resolution (forge is the arbiter, period)
+- Scoped reveals / negotiation turns (room is submit-and-verify, not a conversation)
+- Multi-TEE architecture (single TEE instance hosts everything)
 
 ---
 
@@ -586,39 +590,57 @@ This is a standard pattern for on-chain indexing. The agent does not need a subg
 
 ## 8. Open Questions
 
-### 8.1 Who Runs the Protocol Agent?
-
-In the hackathon demo, the TEE runs the protocol agent. But in production, who operates the protocol's side?
-
-Options:
-- **Protocol team runs their own agent** in their own TEE. Most flexible but highest setup cost. Unlikely for most DeFi teams.
-- **Mnemo gateway runs a default protocol agent.** The protocol configures it via the IPFS metadata (bounty terms, scope, invariants). The gateway agent follows the rules mechanically. This is the most practical option.
-- **Third-party agent operators.** Companies that specialize in running protocol-side agents, similar to how audit firms operate today. Future ecosystem play.
-
-For the hackathon, option 2: the TEE gateway runs a simple protocol agent that evaluates claims against invariants and negotiates within the bounty range.
-
-### 8.2 How Does the Protocol Agent Verify Claims?
-
-The protocol agent needs to run the researcher's PoC to verify it works. This means the protocol agent needs:
-
-- Access to an Anvil fork of the target chain.
-- The ability to compile and run Foundry tests.
-- Invariant definitions for the target contracts.
-
-This is exactly what `@mnemo/dvdefi` and `@mnemo/verifier` already provide. The protocol agent uses the existing verification pipeline: forge build, forge test, invariant checks.
-
-### 8.3 Privacy of Registry Entries
+### 8.1 Privacy of Registry Entries
 
 Registering on the MnemoRegistry is a public signal: "we have a bug bounty and want audits." This is fine -- bug bounty programs are already public (ImmuneFi listings are public). The registry is equivalent to a bounty platform listing.
 
-What must NOT be public: which protocols have active disclosures, what severity, what component. This is why disclosure intents go through the TEE, not on-chain. The registry is public. The negotiation is private.
+What must NOT be public: which protocols have active disclosures, what severity, what component. This is why disclosure intents go through the TEE, not on-chain. The registry is public. The verification is private.
 
-### 8.4 Anti-Spam
+### 8.2 Anti-Spam
 
 What stops a low-quality agent from spamming disclosure intents to every protocol?
 
-- **Reputation filter**: Protocol agents can require minimum reputation scores (ERC-8004 feedback count/value) before accepting intents.
-- **Stake requirement**: The registry could require researchers to stake a small amount when submitting an intent, refunded on valid submission, slashed on spam. Not implementing for hackathon.
+- **Reputation filter**: The TEE gateway can require minimum reputation scores (ERC-8004 feedback count/value) before accepting intents.
+- **Stake requirement**: The registry could require researchers to stake a small amount when submitting an intent, refunded on valid submission (forge passes), slashed on spam (forge fails repeatedly). Not implementing for hackathon.
 - **Rate limiting**: The TEE gateway can rate-limit intents per agent per time window. Simple and effective.
+- **Economic disincentive**: Submitting invalid exploits wastes the researcher's time but costs the protocol nothing (auto-refund on forge failure).
 
 For the hackathon: no anti-spam. The demo has one researcher and one protocol.
+
+### 8.3 Escrow Amount Flexibility
+
+For the hackathon, escrow amount = registry's `maxBounty`. No negotiation. In production, the escrow amount could be tiered (the researcher's intent could hint at severity, and the protocol funds accordingly). This reintroduces negotiation complexity that we deliberately avoid for the demo.
+
+### 8.4 What If Forge Is Not a Complete Arbiter?
+
+Forge verification is a strong signal but not perfect. Some vulnerabilities:
+
+- Require specific timing or MEV conditions that are hard to reproduce in a fork.
+- Involve economic design flaws that are not expressible as a single forge test.
+- Depend on cross-protocol interactions that require multi-contract simulation.
+
+For the hackathon, we acknowledge this limitation and scope to vulnerabilities that ARE expressible as forge tests (which covers the vast majority of smart contract bugs). More nuanced verification is future work.
+
+---
+
+## 9. Scope for Hackathon
+
+### In Scope
+
+- MnemoRegistry: protocol registration, agent discovery via `nextProtocolId` polling.
+- MnemoEscrow: auto-release on forge pass, auto-refund on forge fail. No human decision.
+- ERC-8004: agent identity bound to Docker image hash + TEE attestation.
+- TEE: Phala dstack (simulated or real), forge verification at pinned block.
+- Agent: polls registry, LLM analysis (DeepSeek), PoC construction, disclosure intent, escrow interaction.
+- Block pinning: fork snapshot at DisclosureIntent time prevents patch-then-dispute.
+
+### Out of Scope (Future Work)
+
+- **Dispute resolution**: Deliberately excluded. The forge result is final. Adding dispute resolution opens a DAO/governance rabbit hole that is out of scope. Acknowledged as a real limitation -- some edge cases (forge passing on a non-exploitable pattern, forge failing due to environment differences) need human arbitration in production.
+- **Severity negotiation**: Escrow amount is flat (maxBounty). Per-severity tiers reintroduce the negotiation complexity we are avoiding.
+- **Protocol agent**: No protocol-side agent in the demo. The protocol is a human or script that funds escrow.
+- **Scoped reveals / multi-turn negotiation**: The room is submit-and-verify, not a conversation.
+- **Duplicate detection**: If two agents find the same bug, both get paid if both pass forge. Private set membership (OPRF) is needed for real dedup.
+- **Anti-spam / staking**: One researcher, one protocol in the demo.
+- **Multi-TEE architecture**: Single TEE instance for the demo.
+- **On-chain DCAP attestation verification**: Hash comparison only for demo.
