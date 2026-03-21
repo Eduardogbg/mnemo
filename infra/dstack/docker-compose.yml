@@ -34,11 +34,8 @@ services:
       - "8090:8090"
     networks:
       - mnemo-internal
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:8090/prpc/Tappd.Info || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    # No healthcheck — tappd-simulator image has no shell/wget.
+    # Services use service_started instead of service_healthy.
 
   # ── Anvil (Eth Devnet) ─────────────────────────────────────
   # Run natively: anvil --host 0.0.0.0 --block-time 1
@@ -100,7 +97,7 @@ services:
       - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
     depends_on:
       dstack-simulator:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mnemo-internal
     profiles: ["demo"]
@@ -119,7 +116,7 @@ services:
       - IPFS_API=http://ipfs:5001
     depends_on:
       dstack-simulator:
-        condition: service_healthy
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

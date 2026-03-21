@@ -84,6 +84,7 @@
 | [packages/dvdefi/](packages/dvdefi/) | **DVDeFi integration** — Foundry/Anvil services, 3 challenge definitions, forge-based verification pipeline |
 | [packages/verity/](packages/verity/) | **Verity** — typed invariant checking via voltaire-effect, 9 concrete invariants, PoC scripts |
 | [packages/verifier/](packages/verifier/) | **Verifier** — hybrid pipeline (forge + invariants), LLM verifier agent + tools, E2E tests |
+| [packages/researcher/](packages/researcher/) | **Researcher agent** — autonomous 5-phase loop, execution log, unified E2E demo (`e2e-discovery.ts`) |
 | [packages/harness/](packages/harness/) | Agent harness — room-based negotiation, provider abstraction (OpenRouter, mock) |
 | [packages/venice/](packages/venice/) | Venice E2EE client — ECDH key exchange, AES-256-GCM encryption |
 | [packages/web/](packages/web/) | Demo frontend & API server — Effect HttpApi, Bun, React 19, real-time WebSocket |
@@ -94,8 +95,9 @@
 |---|---|
 | [contracts/src/MnemoEscrow.sol](contracts/src/MnemoEscrow.sol) | **TEE-resolved escrow** — create/fund/release/refund lifecycle, blind commitment hashes, permissionless expiry |
 | [contracts/src/MnemoReputation.sol](contracts/src/MnemoReputation.sol) | **ERC-8004 reputation wrapper** — asymmetric detail (researcher gets severity, protocol gets outcome only), double-post prevention |
-| [contracts/script/Deploy.s.sol](contracts/script/Deploy.s.sol) | Deployment script for Base Sepolia |
-| [contracts/test/](contracts/test/) | 26 tests (18 escrow + 8 reputation), all passing |
+| [contracts/src/MnemoRegistry.sol](contracts/src/MnemoRegistry.sol) | **Protocol discovery registry** — register/update/deactivate, 14 tests |
+| [contracts/script/Deploy.s.sol](contracts/script/Deploy.s.sol) | Deployment script for Base Sepolia (Escrow + Reputation + Registry) |
+| [contracts/test/](contracts/test/) | 40 tests (18 escrow + 8 reputation + 14 registry), all passing |
 
 ## Infrastructure
 

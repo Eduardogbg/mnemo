@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 import {MnemoEscrow} from "../src/MnemoEscrow.sol";
 import {MnemoReputation} from "../src/MnemoReputation.sol";
+import {MnemoRegistry} from "../src/MnemoRegistry.sol";
 
 /**
  * @notice Deploy MnemoEscrow + MnemoReputation to Base Sepolia.
@@ -33,6 +34,9 @@ contract Deploy is Script {
 
         MnemoReputation reputation = new MnemoReputation(reputationRegistry, address(escrow));
         console.log("MnemoReputation:", address(reputation));
+
+        MnemoRegistry registry = new MnemoRegistry();
+        console.log("MnemoRegistry:", address(registry));
 
         vm.stopBroadcast();
     }
