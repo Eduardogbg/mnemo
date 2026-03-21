@@ -1,0 +1,125 @@
+# Mnemo — Production CVM Compose (Phala dstack)
+#
+# This file runs inside a real Phala CVM (TEE). Key differences from dev:
+#   - No simulator service (the real dstack guest agent provides /var/run/tappd.sock)
+#   - Pre-built images from a registry (no build: directives — CVMs can't build)
+#   - Secrets injected via Phala sealed env vars (phala envs set)
+#   - Network isolation enforcing sandbox constraints
+#
+# Deployment:
+#   phala deploy --compose docker-compose.prod.yml \
+#     --type tdx.small \
+#     --env-file .env.prod.sealed
+#
+# Network policy:
+#   analysis (internal): Anvil + analysis tools. Zero egress.
+#   egress-restricted: RPC proxy allowlists read-only methods.
+#   inference: Allowed to reach Redpill/OpenRouter for LLM calls.
+#
+# Attestation chain:
+#   Docker image hash → RTMR3 (covers this compose file including network policies)
+#   getQuote(agentAddress) → TDX quote binding agent wallet to TEE
+#   Verifier checks: quote.RTMR3 matches expected compose hash → sandbox enforced
+#
+# Instance: tdx.small (1 vCPU, 2 GB RAM, $0.058/hr)
+
+networks:
+  # Internal-only network for analysis (Anvil, Slither, Echidna)
+  # Zero egress — no internet access at all
+  analysis:
+    internal: true
+
+  # Restricted egress network — only reaches RPC proxy and inference
+  egress-restricted:
+    driver: bridge
+
+  # Default bridge for services that need inter-container communication
+  default:
+    driver: bridge
+
+services:
+  # ── Anvil (local fork for analysis) ───────────────────────
+  # Provides a sandboxed fork of Base for vulnerability analysis.
+  # On the analysis network only — cannot reach the internet.
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: mnemo-anvil
+    entrypoint: ["anvil", "--fork-url", "https://sepolia.base.org", "--host", "0.0.0.0"]
+    networks:
+      - analysis
+    expose:
+      - "8545"
+    restart: unless-stopped
+
+  # ── RPC Proxy (read-only allowlist) ───────────────────────
+  # Sits between the researcher agent and archive RPC.
+  # Allows: eth_call, eth_getCode, eth_getStorageAt, eth_getBalance, etc.
+  # Blocks: eth_sendRawTransaction, eth_sendTransaction, eth_sign, personal_sign
+  rpc-proxy:
+    image: ghcr.io/hackerdocc/mnemo-rpc-proxy:latest
+    container_name: mnemo-rpc-proxy
+    environment:
+      - UPSTREAM_RPC=https://sepolia.base.org
+      - PORT=8545
+    networks:
+      - egress-restricted
+      - analysis
+    expose:
+      - "8545"
+    restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        tag: mnemo-rpc-proxy
+
+  # ── Mnemo Harness (negotiation runtime + autonomous agent) ──
+  # The core agent runtime: manages rooms, scoped reveals,
+  # TEE attestation, autonomous researcher loop, and on-chain integration.
+  mnemo-harness:
+    image: ghcr.io/hackerdocc/mnemo-harness:latest
+    container_name: mnemo-harness
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - REDPILL_API_KEY=${REDPILL_API_KEY}
+      - DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090
+      # Agent uses RPC proxy, NOT direct archive node
+      - RPC_URL=http://rpc-proxy:8545
+      - ANVIL_URL=http://anvil:8545
+      - CHAIN=${CHAIN:-local}
+    volumes:
+      - /var/run/tappd.sock:/var/run/tappd.sock
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    networks:
+      - egress-restricted
+      - analysis
+      - default
+    ports:
+      - "3000:3000"
+    depends_on:
+      - anvil
+      - rpc-proxy
+    restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        tag: mnemo-harness
+
+  # ── Mnemo Web (demo frontend + API) ─────────────────────
+  # Serves the negotiation demo UI and API endpoints.
+  # Optional — can be omitted for headless/CLI demos.
+  mnemo-web:
+    image: ghcr.io/hackerdocc/mnemo-web:latest
+    container_name: mnemo-web
+    environment:
+      - HARNESS_URL=http://mnemo-harness:3000
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+    depends_on:
+      - mnemo-harness
+    restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        tag: mnemo-web
