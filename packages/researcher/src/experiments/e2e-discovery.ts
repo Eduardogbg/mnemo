@@ -725,10 +725,8 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
 async function main() {
   await preflight()
 
-  const layers = Effect.provide(
-    program,
-    layerFromConfig(providerConfig),
-  ).pipe(
+  const layers = program.pipe(
+    Effect.provide(layerFromConfig(providerConfig)),
     Effect.provide(RegistryMockLayer()),
     Effect.provide(EscrowMockLayer()),
     Effect.provide(Erc8004MockLayer()),
