@@ -17,18 +17,23 @@ import { Provider, layerFromConfig, type ProviderConfig } from "@mnemo/core"
 // Config
 // ---------------------------------------------------------------------------
 
+// Venice is primary, OpenRouter is fallback
+const VENICE_API_KEY = process.env.VENICE_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
-if (!OPENROUTER_API_KEY) {
-  console.error("OPENROUTER_API_KEY not set. Check .env or export it.")
+
+const apiKey = VENICE_API_KEY || OPENROUTER_API_KEY
+if (!apiKey) {
+  console.error("No API key found. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
   process.exit(1)
 }
 
+const useVenice = !!VENICE_API_KEY
 const providerConfig: ProviderConfig = {
-  apiKey: Redacted.make(OPENROUTER_API_KEY),
-  baseURL: "https://openrouter.ai/api/v1",
-  model: "deepseek/deepseek-chat",
-  temperature: 0.3, // lower for more deterministic analysis
-  maxTokens: 2048,
+  apiKey: Redacted.make(apiKey),
+  baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
+  model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
+  temperature: 0.3,
+  maxTokens: 4096,
 }
 
 // ---------------------------------------------------------------------------

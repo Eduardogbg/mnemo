@@ -56,11 +56,11 @@ bun run src/experiments/e2e-discovery.ts
 This runs the complete Mnemo flow:
 1. **Register** a protocol on the local MnemoRegistry
 2. **Discover** — agent polls registry, finds new protocol
-3. **Analyze** — agent sends contract source to DeepSeek (via Venice) for blind audit
-4. **Detect** — keyword scoring on LLM response (finds reentrancy, critical severity)
+3. **Analyze** — agent sends contract source to LLM (Venice) for blind audit (hypothesis)
+4. **Verify** — forge runs exploit test + patched test → `VALID_BUG` (proof)
 5. **Disclose** — DisclosureIntent via TEE gateway (no details leaked)
-6. **Negotiate** — prover vs verifier agents in Room (up to 6 turns)
-7. **Settle** — if accepted: escrow created, funded by protocol, auto-released after verification
+6. **Negotiate** — prover vs verifier agents in Room (up to 6 turns, forge evidence as proof)
+7. **Settle** — escrow created, funded by protocol, TEE auto-releases after forge verification
 
 ### Optional: RPC Sandbox Demo
 

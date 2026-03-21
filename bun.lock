@@ -67,6 +67,7 @@
       "dependencies": {
         "@mnemo/chain": "workspace:*",
         "@mnemo/core": "workspace:*",
+        "@mnemo/dvdefi": "workspace:*",
         "@mnemo/harness": "workspace:*",
         "@mnemo/verifier": "workspace:*",
         "@mnemo/verity": "workspace:*",
