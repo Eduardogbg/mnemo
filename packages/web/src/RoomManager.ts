@@ -29,7 +29,7 @@ import {
 import { FoundryLive } from "@mnemo/dvdefi"
 import {
   Escrow,
-  EscrowLocalLayer,
+  EscrowMockLayer,
   type EscrowStatus,
 } from "@mnemo/chain"
 import { proverTools, verifierTools, type AgentConfig } from "@mnemo/harness"
@@ -170,18 +170,22 @@ const formatEvidence = (result: HybridResult): string => {
 }
 
 /**
- * Upload evidence to mock IPFS (in-process, no external server needed).
- * Returns a deterministic CID based on content hash.
+ * Upload evidence to IPFS via Kubo-compatible API.
  */
-const uploadToMockIpfs = async (evidence: Record<string, unknown>): Promise<IpfsEvent> => {
+const IPFS_API = process.env.IPFS_API ?? "http://localhost:5001"
+const IPFS_GATEWAY = process.env.IPFS_GATEWAY ?? "http://localhost:8080"
+
+const uploadToIpfs = async (evidence: Record<string, unknown>): Promise<IpfsEvent> => {
   const json = JSON.stringify(evidence, null, 2)
-  const data = new TextEncoder().encode(json)
-  const hash = await crypto.subtle.digest("SHA-256", data)
-  const hex = Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-  const cid = `bafybei${hex.slice(0, 52)}`
-  return { cid, url: `https://w3s.link/ipfs/${cid}` }
+  const form = new FormData()
+  form.append("file", new Blob([json], { type: "application/json" }))
+  const res = await fetch(`${IPFS_API}/api/v0/add`, {
+    method: "POST",
+    body: form,
+  })
+  if (!res.ok) throw new Error(`IPFS upload failed: ${res.status} ${res.statusText}`)
+  const { Hash } = (await res.json()) as { Hash: string }
+  return { cid: Hash, url: `${IPFS_GATEWAY}/ipfs/${Hash}` }
 }
 
 /**
@@ -271,7 +275,7 @@ const runEscrow = (
       return event
     }
   }).pipe(
-    Effect.provide(EscrowLocalLayer("http://localhost:8545")),
+    Effect.provide(EscrowMockLayer()),
     Effect.catchAll((error) => {
       console.error("[RoomManager] Escrow failed:", error)
       return Effect.succeed(null as EscrowEvent | null)
@@ -385,7 +389,7 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
             timestamp: new Date().toISOString(),
           }
 
-          const ipfsResult = yield* Effect.promise(() => uploadToMockIpfs(ipfsPayload))
+          const ipfsResult = yield* Effect.promise(() => uploadToIpfs(ipfsPayload))
           entry.ipfs = ipfsResult
           yield* PubSub.publish(pubsub, { type: "ipfs", data: ipfsResult })
 

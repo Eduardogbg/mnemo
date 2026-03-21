@@ -7,7 +7,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "demo": "bun run src/demo.ts"
+    "demo": "bun run src/experiments/e2e-discovery.ts"
   },
   "dependencies": {
     "effect": "^3.19.14",
@@ -15,7 +15,8 @@
     "@mnemo/harness": "workspace:*",
     "@mnemo/chain": "workspace:*",
     "@mnemo/verity": "workspace:*",
-    "@mnemo/verifier": "workspace:*"
+    "@mnemo/verifier": "workspace:*",
+    "@mnemo/dvdefi": "workspace:*"
   },
   "devDependencies": {
     "bun-types": "latest",
