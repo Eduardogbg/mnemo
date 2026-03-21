@@ -1,73 +1,63 @@
-# Mnemo — CLI Demo Guide
+# Mnemo — Demo Guide
 
 ## Prerequisites
 
 - Docker + Docker Compose
 - Bun (v1.3+)
-- Foundry (`forge`, `anvil`, `cast`)
+- Foundry (`forge`, `anvil`)
+- [damn-vulnerable-defi](https://github.com/tinchoabbate/damn-vulnerable-defi) cloned to `repos/damn-vulnerable-defi`
 - API keys in `.env` (VENICE_API_KEY required, OPENROUTER_API_KEY optional)
 
-## Quick Start (3 Terminals)
+## Quick Start
 
-### Terminal 1: Infrastructure
+### 1. Start infrastructure
 
 ```bash
-# Start TEE simulator
-cd infra/dstack
-docker compose --env-file ../../.env up -d dstack-simulator
+# Start IPFS + TEE simulator
+docker compose -f infra/dstack/docker-compose.yml --env-file .env up -d ipfs dstack-simulator
 
-# Start local Ethereum devnet
+# Start local Ethereum devnet (background)
 anvil --block-time 1 &
-
-# Optional: start IPFS
-docker compose --env-file ../../.env up -d ipfs
-
-# Check everything is up
-docker compose ps
-curl -s -X POST http://localhost:8090/prpc/Tappd.TdxQuote \
-  -H 'Content-Type: application/json' \
-  -d '{"report_data":"'$(openssl rand -hex 32)'"}' | head -c 100
-echo "...OK"
-
-cast chain-id --rpc-url http://localhost:8545
 ```
 
-### Terminal 2: TEE Attestation Demo
+### 2. Run the E2E demo
+
+```bash
+set -a && source .env && set +a
+cd packages/researcher
+bun run demo
+```
+
+The script runs preflight checks and will tell you exactly what's missing if anything isn't set up.
+
+## What the demo does
+
+```
+ 1. Setup          — wire local layers (Registry, Escrow, ERC-8004, ExecutionLog)
+ 2. Identity       — register protocol + researcher agents (ERC-8004)
+ 3. Attestation    — compute composeHash, generate TDX quote, bind RTMR[3]
+ 4. Registry       — register a protocol (SideEntrance challenge) on MnemoRegistry
+ 5. Discovery      — agent polls registry, finds new active protocol
+ 6. LLM Audit      — blind audit via Venice (llama-3.3-70b), no hints given
+ 7. Forge Verify   — exploit test PASSES + patched test PASSES → VALID_BUG
+ 8. Negotiation    — prover vs verifier agents in Room (up to 6 turns)
+ 9. Settlement     — escrow: create → fund → TEE auto-release (forge already proved it)
+10. Post-settle    — reputation feedback, IPFS archival, execution log flush
+```
+
+### TEE Attestation Demo (optional)
 
 ```bash
 bun run scripts/demo-attestation.ts
 ```
 
-Shows:
-1. **Valid TDX quote** — 4/4 structural checks pass (TDX type, signature, event log, RTMR[3])
-2. **Nonce freshness** — different nonces → different REPORTDATA (replay protection)
-3. **Tampered RTMR[3]** — modified code identity → **REJECTED**
-4. **Sandbox explanation** — compose hash enforces read-only RPC + air-gapped analysis
+Shows: valid TDX quote (4/4 checks), nonce freshness (replay protection), tampered RTMR[3] (rejected).
 
-### Terminal 3: Full E2E Discovery-to-Settlement
-
-```bash
-# Source .env and run from researcher package
-set -a && source .env && set +a
-cd packages/researcher
-bun run src/experiments/e2e-discovery.ts
-```
-
-This runs the complete Mnemo flow:
-1. **Register** a protocol on the local MnemoRegistry
-2. **Discover** — agent polls registry, finds new protocol
-3. **Analyze** — agent sends contract source to LLM (Venice) for blind audit (hypothesis)
-4. **Verify** — forge runs exploit test + patched test → `VALID_BUG` (proof)
-5. **Disclose** — DisclosureIntent via TEE gateway (no details leaked)
-6. **Negotiate** — prover vs verifier agents in Room (up to 6 turns, forge evidence as proof)
-7. **Settle** — escrow created, funded by protocol, TEE auto-releases after forge verification
-
-### Optional: RPC Sandbox Demo
+### RPC Sandbox Demo (optional)
 
 ```bash
 # Start read-only RPC proxy
-cd infra/dstack
-docker compose --env-file ../../.env up -d rpc-proxy
+docker compose -f infra/dstack/docker-compose.yml --env-file .env up -d rpc-proxy
 
 # READ works through proxy
 cast balance 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 --rpc-url http://localhost:8546
@@ -80,16 +70,6 @@ cast send 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 # → ERROR: Method eth_sendRawTransaction is blocked by TEE sandbox policy
 ```
 
-### Optional: Contract Deployment (Base Sepolia)
-
-```bash
-# Deploy MnemoRegistry + MnemoEscrow + MnemoReputation
-forge script contracts/script/Deploy.s.sol \
-  --rpc-url https://sepolia.base.org \
-  --private-key $DEPLOYER_KEY \
-  --broadcast --verify
-```
-
 ## Demo Flow
 
 ```
@@ -99,28 +79,31 @@ Protocol registers on MnemoRegistry (on-chain)
 Agent polls registry every 3 min (nextProtocolId)
          │
          ▼
-New protocol found → fetch metadata → LLM audits source
+New protocol found → fetch metadata → LLM audits source (hypothesis)
          │
          ▼
-Vulnerability found → DisclosureIntent via TEE gateway
+LLM finds vuln → forge runs exploit + patched tests (proof)
+         │
+         ▼
+VALID_BUG → DisclosureIntent via TEE gateway
   (researcherAgentId + protocolId + timestamp ONLY — no details)
          │
          ▼
 Protocol notified → funds escrow (GATE — no payment = no details)
          │
          ▼
-TEE room opens → researcher submits exploit code
-         │
-         ▼
-TEE runs forge verification at PINNED BLOCK
+TEE room opens → prover presents forge evidence → verifier evaluates
          │
     ┌────┴────┐
     ▼         ▼
-  PASS      FAIL
+ACCEPTED    REJECTED
     │         │
     ▼         ▼
 AUTO-RELEASE  AUTO-REFUND
 (researcher)  (protocol)
+    │
+    ▼
+Reputation + IPFS archive
 ```
 
 ## Key Talking Points
@@ -129,19 +112,33 @@ AUTO-RELEASE  AUTO-REFUND
 
 2. **Escrow is Access Control** — Protocol pays to learn the vulnerability. No payment = no details.
 
-3. **Attestation = Code Identity** — RTMR[3] binds to exact Docker Compose hash. Modified code → different keys → attestation fails. Agent cannot exfiltrate or sign.
+3. **Attestation = Code Identity** — RTMR[3] binds to exact Docker Compose hash. Modified code → different keys → attestation fails.
 
 4. **Read-Only Sandbox** — RPC proxy allows `eth_call`, blocks `eth_sendRawTransaction`. Network-level enforcement inside TEE.
 
-5. **Agent Identity (ERC-8004)** — On-chain registration on Base Sepolia. Reputation posted after each bounty.
+5. **Agent Identity (ERC-8004)** — On-chain registration. Reputation posted after each bounty.
 
 6. **Pinned Block** — Block number pinned at DisclosureIntent time. Protocol can't patch-then-dispute.
+
+## Output Files
+
+- `agent_log.json` — structured execution log (24 entries across all phases)
+- `agent.json` — agent manifest
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VENICE_API_KEY` | Yes* | Venice API key for LLM inference |
+| `OPENROUTER_API_KEY` | No | Fallback LLM provider (may hit weekly limits) |
+| `IPFS_API` | No | IPFS API endpoint (default: `http://localhost:5001`) |
+| `IPFS_GATEWAY` | No | IPFS gateway URL (default: `http://localhost:8080`) |
+
+\* Either VENICE_API_KEY or OPENROUTER_API_KEY must be set.
 
 ## Cleanup
 
 ```bash
-cd infra/dstack
-docker compose down -v
-# Kill background anvil
-kill %1 2>/dev/null
+docker compose -f infra/dstack/docker-compose.yml down -v
+kill %1 2>/dev/null  # background anvil
 ```

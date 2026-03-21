@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * e2e-discovery.ts — Unified end-to-end demo: identity -> attestation -> registry ->
  * discovery -> analysis -> disclosure -> negotiation -> settlement -> reputation -> archive.
@@ -47,21 +46,85 @@ import {
 } from "@mnemo/harness"
 import { ExecutionLog, ExecutionLogLive } from "../ExecutionLog.js"
 import { resolve } from "node:path"
-import { readFileSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
+
+// ---------------------------------------------------------------------------
+// Preflight checks — fail fast with clear messages
+// ---------------------------------------------------------------------------
+
+const DVDEFI_ROOT = resolve(import.meta.dir, "../../../../repos/damn-vulnerable-defi")
+const IPFS_API = process.env.IPFS_API ?? "http://localhost:5001"
+const IPFS_GATEWAY = process.env.IPFS_GATEWAY ?? "http://localhost:8080"
+
+async function preflight(): Promise<void> {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  // 1. API key
+  if (!process.env.VENICE_API_KEY && !process.env.OPENROUTER_API_KEY) {
+    errors.push("No LLM API key. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
+  }
+
+  // 2. DVDeFi repo (needed for forge verification)
+  if (!existsSync(resolve(DVDEFI_ROOT, "foundry.toml"))) {
+    errors.push(`DVDeFi repo not found at ${DVDEFI_ROOT}\n  Clone it: git clone https://github.com/tinchoabbate/damn-vulnerable-defi repos/damn-vulnerable-defi`)
+  }
+
+  // 3. Forge available
+  try {
+    const proc = Bun.spawn(["forge", "--version"], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+    if (proc.exitCode !== 0) throw new Error()
+  } catch {
+    errors.push("forge not found. Install Foundry: https://book.getfoundry.sh/getting-started/installation")
+  }
+
+  // 4. IPFS (Kubo)
+  try {
+    const res = await fetch(`${IPFS_API}/api/v0/id`, {
+      method: "POST",
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) throw new Error()
+  } catch {
+    warnings.push(`IPFS not reachable at ${IPFS_API}\n  Start it: docker compose -f infra/dstack/docker-compose.yml --env-file .env up -d ipfs\n  IPFS archival (step 10) will fail without it.`)
+  }
+
+  // 5. TEE simulator (optional — only needed for attestation demo)
+  try {
+    const res = await fetch("http://localhost:8090/prpc/Tappd.TdxQuote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report_data: "00".repeat(32) }),
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!res.ok) throw new Error()
+  } catch {
+    warnings.push("TEE simulator not reachable at :8090 — attestation (step 3) will use simulated values.\n  Start it: docker compose -f infra/dstack/docker-compose.yml up -d dstack-simulator")
+  }
+
+  // Print results
+  if (warnings.length > 0) {
+    console.log("=== PREFLIGHT WARNINGS ===")
+    for (const w of warnings) console.log(`  WARN: ${w}`)
+    console.log()
+  }
+
+  if (errors.length > 0) {
+    console.log("=== PREFLIGHT FAILED ===")
+    for (const e of errors) console.log(`  ERROR: ${e}`)
+    console.log("\nFix the errors above and try again.")
+    process.exit(1)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-// Venice is primary, OpenRouter is fallback
 const VENICE_API_KEY = process.env.VENICE_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
-
 const apiKey = VENICE_API_KEY || OPENROUTER_API_KEY
-if (!apiKey) {
-  console.error("No API key found. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
-  process.exit(1)
-}
 
 const useVenice = !!VENICE_API_KEY
 const providerConfig: ProviderConfig = {
@@ -152,12 +215,6 @@ interface DisclosureIntent {
 }
 
 // ---------------------------------------------------------------------------
-// DVDeFi repo root (for forge verification)
-// ---------------------------------------------------------------------------
-
-const DVDEFI_ROOT = resolve(import.meta.dir, "../../../../repos/damn-vulnerable-defi")
-
-// ---------------------------------------------------------------------------
 // Polling-based registry discovery
 // ---------------------------------------------------------------------------
 
@@ -193,9 +250,6 @@ const pollRegistry = (
 // ---------------------------------------------------------------------------
 // IPFS upload — Kubo-compatible API
 // ---------------------------------------------------------------------------
-
-const IPFS_API = process.env.IPFS_API ?? "http://localhost:5001"
-const IPFS_GATEWAY = process.env.IPFS_GATEWAY ?? "http://localhost:8080"
 
 const uploadToIpfs = async (payload: Record<string, unknown>): Promise<{ cid: string; url: string }> => {
   const json = JSON.stringify(payload, null, 2)
@@ -668,17 +722,23 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
 // Wire layers and run
 // ---------------------------------------------------------------------------
 
-const layers = Effect.provide(
-  program,
-  layerFromConfig(providerConfig),
-).pipe(
-  Effect.provide(RegistryMockLayer()),
-  Effect.provide(EscrowMockLayer()),
-  Effect.provide(Erc8004MockLayer()),
-  Effect.provide(ExecutionLogLive),
-)
+async function main() {
+  await preflight()
 
-Effect.runPromise(layers).catch((err) => {
-  console.error("\nE2E script failed:", err)
-  process.exit(1)
-})
+  const layers = Effect.provide(
+    program,
+    layerFromConfig(providerConfig),
+  ).pipe(
+    Effect.provide(RegistryMockLayer()),
+    Effect.provide(EscrowMockLayer()),
+    Effect.provide(Erc8004MockLayer()),
+    Effect.provide(ExecutionLogLive),
+  )
+
+  await Effect.runPromise(layers).catch((err) => {
+    console.error("\nE2E script failed:", err)
+    process.exit(1)
+  })
+}
+
+main()
