@@ -111,6 +111,7 @@ const chatCompletions = (
           Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(300_000), // 5 minute timeout for long responses
       })
 
       if (!response.ok) {
