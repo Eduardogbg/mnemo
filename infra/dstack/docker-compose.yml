@@ -1,20 +1,25 @@
-# Mnemo — Local dstack Development Environment
+# Mnemo — Local Development Environment
 #
-# Emulates a Phala CVM locally using the tappd-simulator.
-# The simulator provides dummy attestation via the same API
-# that the real dstack guest agent serves in production.
+# Full stack for local demo:
+#   - TEE simulator (Phala dstack tappd-simulator)
+#   - Eth devnet (Anvil)
+#   - IPFS node (Kubo)
+#   - RPC proxy (read-only sandbox)
 #
 # Usage:
 #   docker compose --env-file ../../.env up -d
 #   docker compose logs -f
-#   ./test-attestation.sh    # verify attestation works
 #   docker compose down
 #
-# E2E tests (forge pipeline + LLM agent negotiation):
+# Quick start (all infra):
+#   docker compose --env-file ../../.env up -d dstack-simulator anvil ipfs
+#
+# Run E2E demo:
 #   docker compose --env-file ../../.env up --build e2e
 #
-# Forge-only tests (no API key needed):
-#   docker compose --env-file ../../.env run --build e2e bun test src/__tests__/hybrid.test.ts
+# Test attestation:
+#   ./test-attestation.sh
+#   bun run validate-attestation.ts
 
 services:
   # ── TEE Simulator ──────────────────────────────────────────
@@ -29,34 +34,62 @@ services:
       - "8090:8090"
     networks:
       - mnemo-internal
-    # No healthcheck — the simulator is a minimal Rust binary with no shell.
-    # The harness retries connectivity on startup.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8090/prpc/Tappd.Info || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # ── Mnemo Runtime (placeholder / probe) ────────────────────
-  # Simple Node.js container that validates connectivity to the
-  # simulator. Kept for quick smoke-testing without building.
-  mnemo-runtime:
-    image: node:20-alpine
-    container_name: mnemo-runtime
-    working_dir: /app
-    volumes:
-      - ./runtime-probe.mjs:/app/runtime-probe.mjs:ro
-    environment:
-      - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
-    command: ["node", "/app/runtime-probe.mjs"]
-    depends_on:
-      dstack-simulator:
-        condition: service_started
+  # ── Anvil (Eth Devnet) ─────────────────────────────────────
+  # Run natively: anvil --host 0.0.0.0 --block-time 1
+  # (Foundry ghcr image requires auth — run Anvil locally instead)
+  # Uncomment below if you have a working Foundry image:
+  #
+  # anvil:
+  #   image: ghcr.io/foundry-rs/foundry:latest
+  #   container_name: mnemo-anvil
+  #   entrypoint: ["anvil", "--host", "0.0.0.0", "--block-time", "1"]
+  #   ports:
+  #     - "8545:8545"
+  #   networks:
+  #     - mnemo-internal
+
+  # ── IPFS Node (Kubo) ───────────────────────────────────────
+  # Local IPFS for evidence archival and metadata storage.
+  # API on 5001, gateway on 8080.
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: mnemo-ipfs
+    ports:
+      - "5001:5001"   # API
+      - "4001:4001"   # Swarm
+      - "8080:8080"   # Gateway
     networks:
       - mnemo-internal
-    profiles: ["probe"]
+    volumes:
+      - ipfs-data:/data/ipfs
+    environment:
+      - IPFS_PROFILE=test  # faster for local dev
+
+  # ── RPC Proxy (read-only sandbox) ──────────────────────────
+  # Demonstrates that the TEE agent can only READ the chain.
+  # Blocks eth_sendRawTransaction, eth_sign, etc.
+  rpc-proxy:
+    build:
+      context: rpc-proxy
+      dockerfile: Dockerfile
+    container_name: mnemo-rpc-proxy
+    environment:
+      - UPSTREAM_RPC=http://host.docker.internal:8545
+      - PORT=8546
+    ports:
+      - "8546:8546"
+    networks:
+      - mnemo-internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Harness (dual-agent negotiation in simulated TEE) ─────
-  # Runs the full DualAgentTest.ts inside a container alongside
-  # the dstack simulator, proving the TEE attestation path.
-  #
-  # Usage:
-  #   docker compose --env-file ../../.env up --build harness
   harness:
     build:
       context: ../..
@@ -67,33 +100,35 @@ services:
       - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
     depends_on:
       dstack-simulator:
-        condition: service_started
+        condition: service_healthy
     networks:
       - mnemo-internal
+    profiles: ["demo"]
 
-  # ── E2E Verifier Tests ───────────────────────────────────
-  # Runs the full verification E2E: forge pipeline (exploit + patch
-  # verification) + LLM-powered prover/verifier negotiation, all
-  # inside the simulated TEE environment.
-  #
-  # Usage:
-  #   docker compose --env-file ../../.env up --build e2e
+  # ── E2E Verifier Tests ─────────────────────────────────────
   e2e:
     build:
       context: ../..
       dockerfile: infra/dstack/Dockerfile.e2e
     container_name: mnemo-e2e
     environment:
+      - VENICE_API_KEY=${VENICE_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - DSTACK_SIMULATOR_ENDPOINT=http://dstack-simulator:8090
+      - ANVIL_URL=http://host.docker.internal:8545
+      - IPFS_API=http://ipfs:5001
     depends_on:
       dstack-simulator:
-        condition: service_started
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - mnemo-internal
+    profiles: ["demo"]
 
 networks:
   mnemo-internal:
     driver: bridge
-    # In production (Phala CVM), all containers share the CVM's
-    # internal network. This bridge network emulates that isolation.
+
+volumes:
+  ipfs-data:
