@@ -1,10 +1,10 @@
 /**
- * ERC-8004 Effect layers — dual-target (local Anvil + Base Sepolia).
+ * ERC-8004 Effect layers — dual-target.
  *
- * Both provide the same Erc8004 service tag. The demo script picks via config.
+ * Both provide the same Erc8004 service tag. The caller picks via config.
  *
- * Local:   Simulated registries for demo/testing
- * Sepolia: Connects to canonical contracts on Base Sepolia with real signing
+ * mockLayer:  In-memory simulation for tests
+ * liveLayer:  Real on-chain via voltaire-effect (works with any EVM RPC)
  */
 import { Effect, Layer } from "effect"
 import {
@@ -35,14 +35,13 @@ const wrap = (message: string) => (cause: unknown) =>
   })
 
 // ---------------------------------------------------------------------------
-// Local layer (simulated)
+// Mock layer (in-memory, for tests)
 // ---------------------------------------------------------------------------
 
 /**
- * Create a local ERC-8004 layer backed by simulated registries.
- * For the hackathon demo — simulates the interface without real contracts.
+ * In-memory ERC-8004 simulation. No RPC calls — for unit tests only.
  */
-export const localLayer = (_anvilUrl: string): Layer.Layer<Erc8004> => {
+export const mockLayer = (): Layer.Layer<Erc8004> => {
   const service: Erc8004Service = {
     identityAddress: IDENTITY_REGISTRY_ADDRESS,
     reputationAddress: REPUTATION_REGISTRY_ADDRESS,
@@ -91,15 +90,14 @@ export const localLayer = (_anvilUrl: string): Layer.Layer<Erc8004> => {
 }
 
 // ---------------------------------------------------------------------------
-// Sepolia layer (canonical registries on Base Sepolia)
+// Live layer (real on-chain via voltaire-effect)
 // ---------------------------------------------------------------------------
 
 /**
- * Create a Base Sepolia ERC-8004 layer using voltaire-effect's Contract().
- * Requires a private key for signing transactions.
+ * ERC-8004 layer backed by real contracts at the canonical addresses.
+ * Works with any EVM RPC — Anvil, Base Sepolia, Base mainnet.
  */
-export const sepoliaLayer = (privateKey: string): Layer.Layer<Erc8004> => {
-  const rpcUrl = "https://sepolia.base.org"
+export const liveLayer = (privateKey: string, rpcUrl: string): Layer.Layer<Erc8004> => {
 
   // Common layer stack for write operations
   const writeStack = Layer.mergeAll(

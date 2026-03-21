@@ -6,7 +6,7 @@
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
-import { localLayer, Escrow } from "../EscrowClient.js"
+import { mockLayer, Escrow } from "../EscrowClient.js"
 
 describe("EscrowClient (local)", () => {
   test("create -> fund -> release lifecycle", async () => {
@@ -46,7 +46,7 @@ describe("EscrowClient (local)", () => {
     })
 
     await Effect.runPromise(
-      program.pipe(Effect.provide(localLayer("http://localhost:8545")))
+      program.pipe(Effect.provide(mockLayer()))
     )
   })
 
@@ -70,7 +70,7 @@ describe("EscrowClient (local)", () => {
     })
 
     await Effect.runPromise(
-      program.pipe(Effect.provide(localLayer("http://localhost:8545")))
+      program.pipe(Effect.provide(mockLayer()))
     )
   })
 
@@ -82,7 +82,7 @@ describe("EscrowClient (local)", () => {
 
     await expect(
       Effect.runPromise(
-        program.pipe(Effect.provide(localLayer("http://localhost:8545")))
+        program.pipe(Effect.provide(mockLayer()))
       )
     ).rejects.toThrow()
   })

@@ -3,9 +3,9 @@
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
-import { localLayer, Registry } from "../RegistryClient.js"
+import { mockLayer, Registry } from "../RegistryClient.js"
 
-const layer = localLayer()
+const layer = mockLayer()
 
 describe("RegistryClient (local)", () => {
   test("register a protocol and verify the data", async () => {

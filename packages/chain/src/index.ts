@@ -11,8 +11,8 @@ export {
   type FeedbackEntry,
 } from "./erc8004/Erc8004.js"
 export {
-  localLayer as Erc8004LocalLayer,
-  sepoliaLayer as Erc8004SepoliaLayer,
+  mockLayer as Erc8004MockLayer,
+  liveLayer as Erc8004LiveLayer,
 } from "./erc8004/layer.js"
 export {
   IDENTITY_REGISTRY_ADDRESS,
@@ -28,8 +28,8 @@ export {
 export {
   Escrow,
   EscrowError,
-  localLayer as EscrowLocalLayer,
-  sepoliaLayer as EscrowSepoliaLayer,
+  mockLayer as EscrowMockLayer,
+  liveLayer as EscrowLiveLayer,
   type EscrowService,
   type EscrowData,
   type EscrowStatus,
@@ -40,8 +40,8 @@ export {
 export {
   Registry,
   RegistryError,
-  localLayer as RegistryLocalLayer,
-  sepoliaLayer as RegistrySepoliaLayer,
+  mockLayer as RegistryMockLayer,
+  liveLayer as RegistryLiveLayer,
   type RegistryService,
   type ProtocolData,
 } from "./RegistryClient.js"

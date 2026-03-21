@@ -2,8 +2,8 @@
  * EscrowClient — Effect service for MnemoEscrow contract interactions.
  *
  * Dual-target via Effect layers:
- *   - local(anvilUrl): simulates escrow operations for demo
- *   - sepolia(privateKey, escrowAddress): real Base Sepolia transactions
+ *   - mockLayer(): in-memory simulation for tests
+ *   - liveLayer(privateKey, escrowAddress, rpcUrl): real on-chain transactions
  */
 import { Context, Effect, Layer, Data } from "effect"
 import {
@@ -91,10 +91,10 @@ export class Escrow extends Context.Tag("@mnemo/chain/Escrow")<
 >() {}
 
 // ---------------------------------------------------------------------------
-// Local layer (simulated)
+// Mock layer (in-memory, for tests)
 // ---------------------------------------------------------------------------
 
-export const localLayer = (_anvilUrl: string): Layer.Layer<Escrow> => {
+export const mockLayer = (): Layer.Layer<Escrow> => {
   let nextId = 0n
   const store = new Map<bigint, EscrowData>()
 
@@ -163,7 +163,7 @@ export const localLayer = (_anvilUrl: string): Layer.Layer<Escrow> => {
 }
 
 // ---------------------------------------------------------------------------
-// Sepolia layer (real Base Sepolia transactions)
+// Live layer (real on-chain via voltaire-effect)
 // ---------------------------------------------------------------------------
 
 const wrap = (message: string) => (cause: unknown) =>
@@ -172,11 +172,15 @@ const wrap = (message: string) => (cause: unknown) =>
     cause,
   })
 
-export const sepoliaLayer = (
+/**
+ * Escrow layer backed by a deployed MnemoEscrow contract.
+ * Works with any EVM RPC — Anvil, Base Sepolia, Base mainnet.
+ */
+export const liveLayer = (
   privateKey: string,
   escrowAddress: string,
+  rpcUrl: string,
 ): Layer.Layer<Escrow> => {
-  const rpcUrl = "https://sepolia.base.org"
 
   const writeStack = Layer.mergeAll(
     Signer.Live,

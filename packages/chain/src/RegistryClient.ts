@@ -2,8 +2,8 @@
  * RegistryClient — Effect service for MnemoRegistry contract interactions.
  *
  * Dual-target via Effect layers:
- *   - localLayer(): simulates registry operations in-memory for demo/testing
- *   - sepoliaLayer(privateKey, registryAddress): real Base Sepolia transactions
+ *   - mockLayer(): in-memory simulation for tests
+ *   - liveLayer(privateKey, registryAddress, rpcUrl): real on-chain transactions
  */
 import { Context, Effect, Layer, Data } from "effect"
 import {
@@ -71,10 +71,10 @@ export class Registry extends Context.Tag("@mnemo/chain/Registry")<
 >() {}
 
 // ---------------------------------------------------------------------------
-// Local layer (simulated)
+// Mock layer (in-memory, for tests)
 // ---------------------------------------------------------------------------
 
-export const localLayer = (): Layer.Layer<Registry> => {
+export const mockLayer = (): Layer.Layer<Registry> => {
   let nextId = 0n
   const store = new Map<bigint, ProtocolData>()
 
@@ -145,7 +145,7 @@ export const localLayer = (): Layer.Layer<Registry> => {
 }
 
 // ---------------------------------------------------------------------------
-// Sepolia layer (real Base Sepolia transactions)
+// Live layer (real on-chain via voltaire-effect)
 // ---------------------------------------------------------------------------
 
 const wrap = (message: string) => (cause: unknown) =>
@@ -154,11 +154,15 @@ const wrap = (message: string) => (cause: unknown) =>
     cause,
   })
 
-export const sepoliaLayer = (
+/**
+ * Registry layer backed by a deployed MnemoRegistry contract.
+ * Works with any EVM RPC — Anvil, Base Sepolia, Base mainnet.
+ */
+export const liveLayer = (
   privateKey: string,
   registryAddress: string,
+  rpcUrl: string,
 ): Layer.Layer<Registry> => {
-  const rpcUrl = "https://sepolia.base.org"
 
   const writeStack = Layer.mergeAll(
     Signer.Live,
