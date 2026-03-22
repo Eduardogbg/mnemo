@@ -21,7 +21,7 @@
  */
 import * as path from "node:path"
 import { readFileSync, existsSync } from "node:fs"
-import { Context, Effect, Layer, PubSub, Fiber, Option, Stream } from "effect"
+import { Context, Effect, Layer, PubSub, Fiber, Option, Stream, Schedule } from "effect"
 import * as LanguageModel from "@effect/ai/LanguageModel"
 import {
   makeRoom,
@@ -161,6 +161,27 @@ export interface RoomEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Agent Events (autonomous background agent)
+// ---------------------------------------------------------------------------
+
+export type AgentEvent =
+  | { type: "agent_status"; data: { status: AgentStatus; protocolId?: string } }
+  | { type: "agent_discovery"; data: { protocolId: string; name: string; bounty: string } }
+  | { type: "agent_room_created"; data: { roomId: string; challengeId: string } }
+  | { type: "agent_log"; data: { message: string; level: "info" | "warn" | "error" } }
+
+export type AgentStatus = "idle" | "scanning" | "analyzing" | "verifying" | "negotiating"
+
+export interface AgentState {
+  status: AgentStatus
+  currentProtocol?: string
+  roomsCreated: string[]
+  lastSeenRegistryId: number
+  /** Set of protocolId strings already processed (avoid re-scanning). */
+  processedProtocols: Set<string>
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -184,6 +205,10 @@ export interface RoomManagerService {
   }>
   readonly subscribe: (roomId: string) => Effect.Effect<PubSub.PubSub<RoomEvent> | null>
   readonly listChallenges: () => ReadonlyArray<HybridChallenge>
+  // Autonomous agent
+  readonly startAgent: () => Effect.Effect<void>
+  readonly subscribeAgent: () => Effect.Effect<PubSub.PubSub<AgentEvent>>
+  readonly getAgentStatus: () => { status: string; currentProtocol?: string; roomsCreated: string[] }
 }
 
 export class RoomManager extends Context.Tag("@mnemo/web/RoomManager")<
@@ -201,12 +226,32 @@ const DVDEFI_ROOT = path.resolve(import.meta.dir, "../../../repos/damn-vulnerabl
 // Constants
 // ---------------------------------------------------------------------------
 
-const AUDIT_MODEL = process.env.VENICE_API_KEY ? "llama-3.3-70b" : "deepseek/deepseek-chat"
+const AUDIT_MODEL = process.env.VENICE_API_KEY ? "deepseek-v3.2" : "deepseek/deepseek-chat"
 const MAX_BOUNTY = 10000000000000000000n // 10 ETH in wei
+
+/** Map metadataURI → challengeId for auto-detection by the agent. */
+const METADATA_TO_CHALLENGE: Record<string, string> = {
+  "ipfs://side-entrance-metadata": "side-entrance",
+  "ipfs://truster-metadata": "truster",
+  "ipfs://unstoppable-metadata": "unstoppable",
+  // Fallback: the agent also tries to parse the URI as "ipfs://<challengeId>-metadata"
+}
 
 // ---------------------------------------------------------------------------
 // Contract source — raw Solidity, no metadata hints
 // ---------------------------------------------------------------------------
+
+/** Resolve a metadataURI to a challengeId. */
+const resolveChallengeId = (metadataURI: string): string | null => {
+  if (METADATA_TO_CHALLENGE[metadataURI]) return METADATA_TO_CHALLENGE[metadataURI]!
+  // Try to parse "ipfs://<name>-metadata"
+  const match = metadataURI.match(/^ipfs:\/\/(.+)-metadata$/)
+  if (match) {
+    const candidate = match[1]!
+    if (getChallenge(candidate)) return candidate
+  }
+  return null
+}
 
 const CONTRACT_SOURCE = `// SPDX-License-Identifier: MIT
 pragma solidity =0.8.25;
@@ -256,16 +301,16 @@ contract SideEntranceLenderPool {
 // Audit prompts
 // ---------------------------------------------------------------------------
 
-const AUDIT_SYSTEM_PROMPT = `You are a smart contract security auditor. You perform thorough audits of Solidity contracts, looking for vulnerabilities, logic errors, and attack vectors. Be specific about:
-- The exact vulnerability mechanism
-- Which functions are affected
-- How an attacker would exploit it step-by-step
-- The severity (Critical / High / Medium / Low / Informational)
+const AUDIT_SYSTEM_PROMPT = `You are an automated security analysis engine performing a blind audit of a smart contract. Your output will be fed into a verification pipeline — write for a technical audience.
+
+Analyze the contract for:
+- Reentrancy, access control, arithmetic, and logic vulnerabilities
+- The exact vulnerable mechanism and affected functions
+- Step-by-step exploitation path
+- Severity classification (Critical / High / Medium / Low / Informational)
 - Recommended fix
 
-Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security auditor — not as an AI assistant.
-
-Do not speculate. Only report findings you are confident about based on the code.`
+Only report findings you are confident about based on the code. Structure your output as a professional audit report.`
 
 const AUDIT_USER_PROMPT = `Audit the following Solidity contract for security vulnerabilities:
 
@@ -385,6 +430,15 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
     // Capture LanguageModel so we can provide it to forked fibers
     const lm = yield* LanguageModel.LanguageModel
     const lmLayer = Layer.succeed(LanguageModel.LanguageModel, lm)
+
+    // Agent PubSub and state — shared across the service lifetime
+    const agentPubsub = yield* PubSub.unbounded<AgentEvent>()
+    const agentState: AgentState = {
+      status: "idle",
+      roomsCreated: [],
+      lastSeenRegistryId: 0,
+      processedProtocols: new Set(),
+    }
 
     const service: RoomManagerService = {
       createRoom: (challengeId: string) =>
@@ -614,9 +668,7 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
             const proverConfig: AgentConfig = {
               id: "prover",
               role: "researcher",
-              systemPrompt: `You are a security researcher who discovered and VERIFIED a vulnerability in a DeFi protocol.
-
-IMPORTANT: Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security researcher — not as an AI assistant.
+              systemPrompt: `You are a security researcher agent operating inside a TEE-secured negotiation room. You discovered and VERIFIED a vulnerability in a DeFi protocol using automated forge testing.
 
 CHALLENGE: ${challenge.name}
 DESCRIPTION: ${challenge.description}
@@ -903,8 +955,633 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
         Effect.succeed(rooms.get(roomId)?.pubsub ?? null),
 
       listChallenges: () => listChallenges(),
+
+      // -----------------------------------------------------------------------
+      // Autonomous agent
+      // -----------------------------------------------------------------------
+
+      subscribeAgent: () => Effect.succeed(agentPubsub),
+
+      getAgentStatus: () => ({
+        status: agentState.status,
+        currentProtocol: agentState.currentProtocol,
+        roomsCreated: [...agentState.roomsCreated],
+      }),
+
+      startAgent: () =>
+        Effect.gen(function* () {
+          console.log("[Agent] Autonomous agent starting — polling registry every 5s")
+          yield* publishAgentLog(agentPubsub, "Autonomous agent started", "info")
+          yield* publishAgentStatus(agentPubsub, agentState, "idle")
+
+          // The polling loop: runs forever (daemon fiber)
+          const loop = Effect.gen(function* () {
+            yield* publishAgentStatus(agentPubsub, agentState, "scanning")
+            console.log(`[Agent] Polling registry from slot ${agentState.lastSeenRegistryId}...`)
+
+            const { newProtocols, nextId } = yield* pollRegistry(registry, agentState.lastSeenRegistryId)
+            agentState.lastSeenRegistryId = nextId
+
+            // Filter out already-processed protocols
+            const unprocessed = newProtocols.filter(
+              (p) => !agentState.processedProtocols.has(p.protocolId.toString()),
+            )
+
+            if (unprocessed.length === 0) {
+              yield* publishAgentStatus(agentPubsub, agentState, "idle")
+              return
+            }
+
+            for (const protocol of unprocessed) {
+              const protocolIdStr = protocol.protocolId.toString()
+              agentState.processedProtocols.add(protocolIdStr)
+
+              // Resolve which challenge this protocol maps to
+              const challengeId = resolveChallengeId(protocol.metadataURI)
+              if (!challengeId) {
+                console.log(`[Agent] Protocol ${protocolIdStr} has unknown metadataURI: ${protocol.metadataURI} — skipping`)
+                yield* publishAgentLog(agentPubsub, `Skipping protocol ${protocolIdStr} — unknown metadataURI: ${protocol.metadataURI}`, "warn")
+                continue
+              }
+
+              const challenge = getChallenge(challengeId)
+              if (!challenge) {
+                console.log(`[Agent] Challenge ${challengeId} not found — skipping`)
+                yield* publishAgentLog(agentPubsub, `Skipping challenge ${challengeId} — not in registry`, "warn")
+                continue
+              }
+
+              const ethBounty = Number(protocol.maxBounty) / 1e18
+              console.log(`[Agent] Discovered protocol "${challenge.name}" (id=${protocolIdStr}), bounty=${ethBounty} ETH`)
+              yield* PubSub.publish(agentPubsub, {
+                type: "agent_discovery",
+                data: { protocolId: protocolIdStr, name: challenge.name, bounty: `${ethBounty} ETH` },
+              })
+
+              // --- Run the full pipeline for this protocol ---
+              yield* runAgentPipeline(
+                agentPubsub,
+                agentState,
+                protocol,
+                challenge,
+                challengeId,
+                erc8004,
+                registry,
+                escrow,
+                lmLayer,
+              )
+            }
+
+            yield* publishAgentStatus(agentPubsub, agentState, "idle")
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.sync(() => {
+                console.error("[Agent] Poll cycle error:", error)
+                agentState.status = "idle"
+              }),
+            ),
+          )
+
+          // Schedule: repeat forever with 5-second spacing
+          yield* Effect.repeat(loop, Schedule.spaced("5 seconds")).pipe(Effect.forkDaemon)
+        }),
     }
 
     return service
   }),
 )
+
+// ---------------------------------------------------------------------------
+// Agent helpers
+// ---------------------------------------------------------------------------
+
+const publishAgentLog = (
+  pubsub: PubSub.PubSub<AgentEvent>,
+  message: string,
+  level: "info" | "warn" | "error",
+) => PubSub.publish(pubsub, { type: "agent_log", data: { message, level } })
+
+const publishAgentStatus = (
+  pubsub: PubSub.PubSub<AgentEvent>,
+  state: AgentState,
+  status: AgentStatus,
+  protocolId?: string,
+) => {
+  state.status = status
+  if (protocolId !== undefined) state.currentProtocol = protocolId
+  return PubSub.publish(pubsub, {
+    type: "agent_status",
+    data: { status, protocolId: protocolId ?? state.currentProtocol },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Agent pipeline — runs steps 1-10 for a discovered protocol
+// ---------------------------------------------------------------------------
+
+const runAgentPipeline = (
+  agentPubsub: PubSub.PubSub<AgentEvent>,
+  agentState: AgentState,
+  protocol: ProtocolData & { protocolId: bigint },
+  challenge: HybridChallenge,
+  challengeId: string,
+  erc8004: Effect.Effect.Success<typeof Erc8004>,
+  registry: RegistryServiceType,
+  escrow: Effect.Effect.Success<typeof Escrow>,
+  lmLayer: Layer.Layer<LanguageModel.LanguageModel>,
+) =>
+  Effect.gen(function* () {
+    const protocolIdStr = protocol.protocolId.toString()
+    yield* publishAgentStatus(agentPubsub, agentState, "analyzing", protocolIdStr)
+
+    // Create a room entry for this autonomous run
+    const roomId = `agent-room-${++roomCounter}-${Date.now()}`
+    const pubsub = yield* PubSub.unbounded<RoomEvent>()
+
+    const entry: RoomEntry = {
+      challengeId,
+      pubsub,
+      fiber: undefined as any,
+      result: null,
+      turns: [],
+      evidence: null,
+      verification: null,
+      escrow: null,
+      ipfs: null,
+      identity: null,
+      attestation: null,
+      registry: null,
+      discovery: null,
+      audit: null,
+      reputation: [],
+      currentPhase: null,
+    }
+    rooms.set(roomId, entry)
+
+    yield* PubSub.publish(agentPubsub, {
+      type: "agent_room_created",
+      data: { roomId, challengeId },
+    })
+    agentState.roomsCreated.push(roomId)
+    console.log(`[Agent] Created room ${roomId} for challenge ${challengeId}`)
+
+    // Fork the pipeline so it runs in the background
+    const fiber = yield* Effect.gen(function* () {
+      // ── Step 1: Setup ──────────────────────────────────────────
+      yield* publishPhase(pubsub, entry, 1, "setup", "start")
+      console.log(`[Agent] [1/10] Setup for room ${roomId}`)
+      yield* publishPhase(pubsub, entry, 1, "setup", "done")
+
+      // ── Step 2: Register agent identities (ERC-8004) ─────────
+      yield* publishPhase(pubsub, entry, 2, "identity", "start")
+      console.log(`[Agent] [2/10] Registering agent identities...`)
+
+      const protocolAgentId = yield* erc8004.registerAgent("ipfs://agent.json#mnemo-protocol")
+      const researcherAgentId = yield* erc8004.registerAgent("ipfs://agent.json#mnemo-researcher")
+
+      const identityEvent: IdentityEvent = {
+        protocolAgentId: protocolAgentId.toString(),
+        researcherAgentId: researcherAgentId.toString(),
+      }
+      entry.identity = identityEvent
+      yield* PubSub.publish(pubsub, { type: "identity", data: identityEvent })
+      console.log(`[Agent]   Protocol=${protocolAgentId}, Researcher=${researcherAgentId}`)
+      yield* publishPhase(pubsub, entry, 2, "identity", "done")
+
+      // ── Step 3: TEE attestation ──────────────────────────────
+      yield* publishPhase(pubsub, entry, 3, "attestation", "start")
+      console.log(`[Agent] [3/10] Generating TEE attestation...`)
+
+      let composeHash = "0x" + "0".repeat(64)
+      try {
+        const composePath = path.resolve(import.meta.dir, "../../../infra/dstack/docker-compose.prod.yml")
+        if (existsSync(composePath)) {
+          const content = readFileSync(composePath, "utf-8")
+          composeHash = yield* hashFile(content)
+        }
+      } catch {
+        // Use zero hash
+      }
+
+      const attestationDoc = yield* generateAttestationJson(
+        `0x${researcherAgentId.toString(16).padStart(40, "0")}`,
+        composeHash,
+      )
+
+      const attestationEvent: AttestationEvent = {
+        quote: attestationDoc.quote,
+        rtmr3: attestationDoc.rtmr3,
+      }
+      entry.attestation = attestationEvent
+      yield* PubSub.publish(pubsub, { type: "attestation", data: attestationEvent })
+      console.log(`[Agent]   Quote: ${attestationDoc.quote.slice(0, 40)}...`)
+      yield* publishPhase(pubsub, entry, 3, "attestation", "done")
+
+      // ── Step 4: Registry (already registered — record it) ───────────
+      yield* publishPhase(pubsub, entry, 4, "registry", "start")
+      console.log(`[Agent] [4/10] Protocol already registered on-chain (id=${protocolIdStr})`)
+
+      const registryEvent: RegistryEvent = {
+        protocolId: protocolIdStr,
+        metadataURI: protocol.metadataURI,
+        maxBounty: protocol.maxBounty.toString(),
+        txHash: "0x" + "00".repeat(32) + " (pre-registered)",
+      }
+      entry.registry = registryEvent
+      yield* PubSub.publish(pubsub, { type: "registry", data: registryEvent })
+      yield* publishPhase(pubsub, entry, 4, "registry", "done")
+
+      // ── Step 5: Discovery (already found — record it) ─────────
+      yield* publishPhase(pubsub, entry, 5, "discovery", "start")
+      console.log(`[Agent] [5/10] Protocol discovered: ${challenge.name}`)
+
+      const ethBounty = Number(protocol.maxBounty) / 1e18
+      const discoveryEvent: DiscoveryEvent = {
+        protocolId: protocolIdStr,
+        name: challenge.name,
+        bounty: `${ethBounty} ETH`,
+        slotsScanned: agentState.lastSeenRegistryId,
+      }
+      entry.discovery = discoveryEvent
+      yield* PubSub.publish(pubsub, { type: "discovery", data: discoveryEvent })
+      yield* publishPhase(pubsub, entry, 5, "discovery", "done")
+
+      // ── Step 6: LLM blind audit with streaming ───────────────
+      yield* publishPhase(pubsub, entry, 6, "audit", "start")
+      yield* publishAgentStatus(agentPubsub, agentState, "analyzing", protocolIdStr)
+      console.log(`[Agent] [6/10] LLM blind audit (streaming)...`)
+      yield* publishAgentLog(agentPubsub, `Running LLM audit on ${challenge.name}...`, "info")
+
+      const auditStartEvent: AuditEvent = { status: "start", model: AUDIT_MODEL }
+      yield* PubSub.publish(pubsub, { type: "audit", data: auditStartEvent })
+
+      const startMs = Date.now()
+      let auditText = ""
+
+      const stream = LanguageModel.streamText({
+        prompt: [
+          { role: "system" as const, content: AUDIT_SYSTEM_PROMPT },
+          { role: "user" as const, content: AUDIT_USER_PROMPT },
+        ],
+      })
+
+      yield* Stream.runForEach(stream, (part: any) =>
+        Effect.gen(function* () {
+          if (part.type === "text-delta" && part.delta) {
+            auditText += part.delta
+            yield* PubSub.publish(pubsub, {
+              type: "audit",
+              data: { status: "delta", model: AUDIT_MODEL, text: part.delta },
+            })
+          }
+        }),
+      ).pipe(Effect.provide(lmLayer))
+
+      const latencyMs = Date.now() - startMs
+
+      const auditDoneEvent: AuditEvent = { status: "done", model: AUDIT_MODEL, latencyMs }
+      yield* PubSub.publish(pubsub, { type: "audit", data: auditDoneEvent })
+      entry.audit = { model: AUDIT_MODEL, text: auditText, latencyMs }
+      console.log(`[Agent]   Audit complete: ${latencyMs}ms, ${auditText.length} chars`)
+      yield* publishPhase(pubsub, entry, 6, "audit", "done")
+
+      // ── Step 7: Forge verification ────────────────────────────
+      yield* publishPhase(pubsub, entry, 7, "verification", "start")
+      yield* publishAgentStatus(agentPubsub, agentState, "verifying", protocolIdStr)
+      console.log(`[Agent] [7/10] Forge verification...`)
+      yield* publishAgentLog(agentPubsub, `Running forge verification on ${challenge.name}...`, "info")
+
+      yield* PubSub.publish(pubsub, {
+        type: "verification",
+        data: { status: "running" },
+      })
+
+      const forgeResult = yield* verifyForgeOnly(challenge, DVDEFI_ROOT).pipe(
+        Effect.provide(FoundryLive),
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            console.error("[Agent] Forge verification failed:", error)
+            yield* PubSub.publish(pubsub, {
+              type: "verification",
+              data: { status: "error", evidence: String(error) },
+            })
+            return null as HybridResult | null
+          }),
+        ),
+      )
+
+      let evidence: string
+      if (forgeResult) {
+        evidence = formatEvidence(forgeResult)
+        entry.evidence = evidence
+        entry.verification = {
+          status: forgeResult.verdict === "VALID_BUG" ? "passed" : "failed",
+          verdict: forgeResult.verdict,
+          evidence: forgeResult.evidence,
+          executionTimeMs: forgeResult.executionTimeMs,
+        }
+        yield* PubSub.publish(pubsub, { type: "verification", data: entry.verification })
+        console.log(`[Agent]   Forge verdict: ${forgeResult.verdict}`)
+      } else {
+        evidence = [
+          `=== VERIFICATION EVIDENCE ===`,
+          `Challenge: ${challenge.name}`,
+          `Note: Forge verification unavailable — using challenge description.`,
+          `Description: ${challenge.description}`,
+        ].join("\n")
+        entry.evidence = evidence
+        entry.verification = { status: "error", evidence: "Forge unavailable" }
+      }
+
+      yield* publishPhase(pubsub, entry, 7, "verification", "done")
+
+      // ── Decision: bug found? ────────────────────────────────
+      const bugFound = forgeResult?.verdict === "VALID_BUG"
+
+      if (!bugFound) {
+        console.log(`[Agent] No valid bug found for ${challenge.name} — marking complete`)
+        yield* publishAgentLog(agentPubsub, `No vulnerability found in ${challenge.name}`, "info")
+        yield* publishAgentStatus(agentPubsub, agentState, "idle")
+
+        // Publish outcome: no bug
+        yield* PubSub.publish(pubsub, {
+          type: "outcome",
+          data: {
+            outcome: "NO_VULNERABILITY",
+            totalTurns: 0,
+            evidence: entry.evidence,
+          },
+        })
+        return
+      }
+
+      console.log(`[Agent] Valid bug found in ${challenge.name} — opening negotiation room`)
+      yield* publishAgentLog(agentPubsub, `VALID_BUG found in ${challenge.name} — starting negotiation`, "info")
+
+      // ── Step 8: Disclosure + Negotiation room ─────────────────
+      yield* publishPhase(pubsub, entry, 8, "negotiation", "start")
+      yield* publishAgentStatus(agentPubsub, agentState, "negotiating", protocolIdStr)
+      console.log(`[Agent] [8/10] Disclosure + Negotiation room...`)
+
+      const proverConfig: AgentConfig = {
+        id: "prover",
+        role: "researcher",
+        systemPrompt: `You are a security researcher agent operating inside a TEE-secured negotiation room. You discovered and VERIFIED a vulnerability in a DeFi protocol using automated forge testing.
+
+CHALLENGE: ${challenge.name}
+DESCRIPTION: ${challenge.description}
+
+YOUR FORGE VERIFICATION RESULTS:
+${forgeResult?.evidence ?? evidence}
+
+YOUR LLM ANALYSIS:
+${auditText.slice(0, 1500)}
+
+YOUR TASK:
+Present the forge-verified vulnerability to the verifier. You have PROOF: the exploit test passes (vulnerability exists) and the patched test passes (fix works).
+When the verifier assigns a severity, use the accept_severity tool to accept it, or reject_severity if you disagree.
+Be concise — 3-5 sentences per turn. Stay technical. Lead with the forge proof.`,
+        toolkit: proverToolkit,
+      }
+
+      const evidenceContext = [
+        `=== FORGE VERIFICATION EVIDENCE ===`,
+        `Verdict: ${forgeResult?.verdict ?? "UNAVAILABLE"}`,
+        `Exploit test: ${forgeResult?.exploitTest.passed ? "PASSED" : "FAILED/UNAVAILABLE"}`,
+        forgeResult?.patchedTest ? `Patched test: ${forgeResult.patchedTest.passed ? "PASSED" : "FAILED"}` : "",
+        forgeResult ? `Execution time: ${forgeResult.executionTimeMs}ms` : "",
+        ``,
+        `--- Researcher's LLM analysis (truncated) ---`,
+        auditText.slice(0, 2000),
+        `--- End analysis ---`,
+      ].filter(Boolean).join("\n")
+
+      const verifierConfig: AgentConfig = {
+        id: "verifier",
+        role: "protocol",
+        systemPrompt: `${VERIFIER_SYSTEM_PROMPT}
+
+You have the following forge-verified evidence from the researcher:
+
+${evidenceContext}
+
+The exploit has been verified by forge: exploit test PASSED (vulnerability exists) and patched test PASSED (fix works). This is cryptographic proof from the TEE.
+
+IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue your verdict. Do not just write text — call the tool.`,
+        toolkit: verifierToolkit,
+      }
+
+      const room = makeRoom(proverConfig, verifierConfig, {
+        maxTurns: 6,
+        openingMessage: `Security researcher requesting verification of a forge-proven vulnerability in ${challenge.name}. Exploit test PASSED, patched test PASSED — verdict: VALID_BUG. Please evaluate.`,
+        onTurn: (turn) => {
+          entry.turns.push(turn)
+          Effect.runFork(PubSub.publish(pubsub, { type: "turn", data: turn }))
+        },
+      })
+
+      const negotiation: NegotiationResult = yield* room
+        .negotiate()
+        .pipe(
+          Effect.provide(InMemoryLayer),
+          Effect.provide(lmLayer),
+        )
+
+      entry.result = negotiation
+      console.log(`[Agent]   Negotiation: ${negotiation.outcome}, ${negotiation.totalTurns} turns`)
+      yield* publishPhase(pubsub, entry, 8, "negotiation", "done")
+
+      // ── Step 9: Escrow settlement ─────────────────────────────
+      yield* publishPhase(pubsub, entry, 9, "settlement", "start")
+      console.log(`[Agent] [9/10] Escrow settlement...`)
+
+      const accepted = negotiation.outcome === "ACCEPTED"
+
+      if (accepted) {
+        const researcherAddress = "0x" + "ee".repeat(20)
+        const commitHash = "0x" + roomId.replace(/[^a-f0-9]/gi, "").padEnd(64, "0").slice(0, 64)
+
+        const { escrowId, txHash: createTx } = yield* escrow.create({
+          funder: protocol.owner,
+          payee: researcherAddress,
+          amount: MAX_BOUNTY,
+          deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
+          commitHash,
+        })
+
+        const escrowIdStr = escrowId.toString()
+        yield* PubSub.publish(pubsub, {
+          type: "escrow",
+          data: { escrowId: escrowIdStr, status: "Created", txHash: createTx },
+        })
+
+        const fundTx = yield* escrow.fund(escrowId, MAX_BOUNTY)
+        yield* PubSub.publish(pubsub, {
+          type: "escrow",
+          data: { escrowId: escrowIdStr, status: "Funded", txHash: fundTx },
+        })
+
+        const releaseTx = yield* escrow.release(escrowId)
+        const escrowEvent: EscrowEvent = { escrowId: escrowIdStr, status: "Released", txHash: releaseTx }
+        entry.escrow = escrowEvent
+        yield* PubSub.publish(pubsub, { type: "escrow", data: escrowEvent })
+        console.log(`[Agent]   Escrow created -> funded -> released`)
+      } else {
+        const commitHash = "0x" + roomId.replace(/[^a-f0-9]/gi, "").padEnd(64, "0").slice(0, 64)
+        const { escrowId, txHash: createTx } = yield* escrow.create({
+          funder: "0x" + "F".repeat(40),
+          payee: "0x" + "A".repeat(40),
+          amount: MAX_BOUNTY,
+          deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
+          commitHash,
+        })
+
+        const escrowIdStr = escrowId.toString()
+        yield* PubSub.publish(pubsub, {
+          type: "escrow",
+          data: { escrowId: escrowIdStr, status: "Created", txHash: createTx },
+        })
+
+        const fundTx = yield* escrow.fund(escrowId, MAX_BOUNTY)
+        yield* PubSub.publish(pubsub, {
+          type: "escrow",
+          data: { escrowId: escrowIdStr, status: "Funded", txHash: fundTx },
+        })
+
+        const refundTx = yield* escrow.refund(escrowId)
+        const escrowEvent: EscrowEvent = { escrowId: escrowIdStr, status: "Refunded", txHash: refundTx }
+        entry.escrow = escrowEvent
+        yield* PubSub.publish(pubsub, { type: "escrow", data: escrowEvent })
+        console.log(`[Agent]   Escrow created -> funded -> refunded (no deal)`)
+      }
+
+      yield* publishPhase(pubsub, entry, 9, "settlement", "done")
+
+      // ── Step 10: Post-settlement (reputation + IPFS archive) ─
+      yield* publishPhase(pubsub, entry, 10, "post-settlement", "start")
+      console.log(`[Agent] [10/10] Post-settlement...`)
+
+      const severity = negotiation.agreedSeverity ?? negotiation.assignedSeverity ?? forgeResult?.severity ?? "critical"
+
+      if (accepted) {
+        const resTx = yield* erc8004.giveFeedback({
+          agentId: researcherAgentId,
+          value: 100n,
+          tag1: "mnemo-disclosure",
+          tag2: severity,
+          feedbackHash: "0x" + "cd".repeat(32),
+        })
+        const resRepEvent: ReputationEvent = {
+          agentId: researcherAgentId.toString(),
+          role: "researcher",
+          value: 100,
+          txHash: resTx,
+        }
+        entry.reputation.push(resRepEvent)
+        yield* PubSub.publish(pubsub, { type: "reputation", data: resRepEvent })
+
+        const proTx = yield* erc8004.giveFeedback({
+          agentId: protocolAgentId,
+          value: 100n,
+          tag1: "mnemo-protocol",
+          tag2: "paid",
+          feedbackHash: "0x" + "ef".repeat(32),
+        })
+        const proRepEvent: ReputationEvent = {
+          agentId: protocolAgentId.toString(),
+          role: "protocol",
+          value: 100,
+          txHash: proTx,
+        }
+        entry.reputation.push(proRepEvent)
+        yield* PubSub.publish(pubsub, { type: "reputation", data: proRepEvent })
+        console.log(`[Agent]   Reputation: researcher +100, protocol +100`)
+      } else {
+        const resTx = yield* erc8004.giveFeedback({
+          agentId: researcherAgentId,
+          value: -50n,
+          tag1: "mnemo-disclosure",
+          tag2: severity,
+          feedbackHash: "0x" + "cd".repeat(32),
+        })
+        const resRepEvent: ReputationEvent = {
+          agentId: researcherAgentId.toString(),
+          role: "researcher",
+          value: -50,
+          txHash: resTx,
+        }
+        entry.reputation.push(resRepEvent)
+        yield* PubSub.publish(pubsub, { type: "reputation", data: resRepEvent })
+
+        const proTx = yield* erc8004.giveFeedback({
+          agentId: protocolAgentId,
+          value: 0n,
+          tag1: "mnemo-protocol",
+          tag2: "disputed",
+          feedbackHash: "0x" + "ef".repeat(32),
+        })
+        const proRepEvent: ReputationEvent = {
+          agentId: protocolAgentId.toString(),
+          role: "protocol",
+          value: 0,
+          txHash: proTx,
+        }
+        entry.reputation.push(proRepEvent)
+        yield* PubSub.publish(pubsub, { type: "reputation", data: proRepEvent })
+        console.log(`[Agent]   Reputation: researcher -50, protocol 0`)
+      }
+
+      // IPFS archive
+      const ipfsPayload = {
+        roomId,
+        protocolId: protocolIdStr,
+        challengeId,
+        verdict: forgeResult?.verdict ?? null,
+        severity,
+        outcome: negotiation.outcome,
+        totalTurns: negotiation.totalTurns,
+        evidence: forgeResult?.evidence ?? evidence,
+        researcherAgentId: researcherAgentId.toString(),
+        protocolAgentId: protocolAgentId.toString(),
+        attestationQuote: attestationDoc.quote.slice(0, 64) + "...",
+        escrowId: entry.escrow?.escrowId ?? null,
+        timestamp: new Date().toISOString(),
+      }
+
+      const ipfsResult = yield* Effect.promise(() => uploadToIpfs(ipfsPayload))
+      entry.ipfs = ipfsResult
+      yield* PubSub.publish(pubsub, { type: "ipfs", data: ipfsResult })
+      console.log(`[Agent]   IPFS archive: CID=${ipfsResult.cid}`)
+
+      yield* publishPhase(pubsub, entry, 10, "post-settlement", "done")
+      console.log(`[Agent] Pipeline complete for room ${roomId}`)
+
+      yield* publishAgentLog(agentPubsub, `Pipeline complete for ${challenge.name} — outcome: ${negotiation.outcome}`, "info")
+
+      // Publish outcome event
+      yield* PubSub.publish(pubsub, {
+        type: "outcome",
+        data: {
+          outcome: negotiation.outcome,
+          totalTurns: negotiation.totalTurns,
+          agreedSeverity: negotiation.agreedSeverity,
+          assignedSeverity: negotiation.assignedSeverity,
+          evidence: entry.evidence,
+        },
+      })
+
+      return negotiation
+    }).pipe(
+      Effect.tapErrorCause((cause) =>
+        Effect.log(`[Agent] Pipeline failed for ${roomId}: ${cause}`),
+      ),
+      Effect.catchAll((error) =>
+        Effect.sync(() => {
+          console.error(`[Agent] Pipeline error for ${roomId}:`, error)
+        }),
+      ),
+      Effect.forkDaemon,
+    )
+
+    entry.fiber = fiber
+  })

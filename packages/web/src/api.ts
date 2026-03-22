@@ -125,6 +125,12 @@ export class ChallengeList extends Schema.Class<ChallengeList>("ChallengeList")(
   challenges: Schema.Array(ChallengeInfo),
 }) {}
 
+export class AgentStatusResponse extends Schema.Class<AgentStatusResponse>("AgentStatusResponse")({
+  status: Schema.String,
+  currentProtocol: Schema.optionalWith(Schema.String, { as: "Option" }),
+  roomsCreated: Schema.Array(Schema.String),
+}) {}
+
 export class NotFound extends Schema.TaggedError<NotFound>()(
   "NotFound",
   { message: Schema.String },
@@ -154,7 +160,17 @@ export class RoomsApi extends HttpApiGroup.make("rooms")
   ) {}
 
 // ---------------------------------------------------------------------------
+// API Group: agent
+// ---------------------------------------------------------------------------
+
+export class AgentApi extends HttpApiGroup.make("agent")
+  .add(
+    HttpApiEndpoint.get("getAgentStatus", "/api/agent/status")
+      .addSuccess(AgentStatusResponse)
+  ) {}
+
+// ---------------------------------------------------------------------------
 // Top-level API
 // ---------------------------------------------------------------------------
 
-export class MnemoApi extends HttpApi.make("mnemo").add(RoomsApi) {}
+export class MnemoApi extends HttpApi.make("mnemo").add(RoomsApi).add(AgentApi) {}

@@ -8,6 +8,29 @@ import { Effect, Option } from "effect"
 import { MnemoApi, NotFound } from "./api.js"
 import { RoomManager } from "./RoomManager.js"
 
+// ---------------------------------------------------------------------------
+// Agent API handlers
+// ---------------------------------------------------------------------------
+
+export const AgentApiLive = HttpApiBuilder.group(MnemoApi, "agent", (handlers) =>
+  handlers
+    .handle("getAgentStatus", () =>
+      Effect.gen(function* () {
+        const mgr = yield* RoomManager
+        const s = mgr.getAgentStatus()
+        return {
+          status: s.status,
+          currentProtocol: s.currentProtocol ? Option.some(s.currentProtocol) : Option.none(),
+          roomsCreated: s.roomsCreated,
+        }
+      })
+    )
+)
+
+// ---------------------------------------------------------------------------
+// Rooms API handlers
+// ---------------------------------------------------------------------------
+
 export const RoomsApiLive = HttpApiBuilder.group(MnemoApi, "rooms", (handlers) =>
   handlers
     .handle("createRoom", ({ payload }) =>

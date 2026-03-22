@@ -25,8 +25,8 @@ import { HttpApiBuilder } from "@effect/platform"
 import { BunHttpServer } from "@effect/platform-bun"
 import { Effect, Layer, PubSub, Queue } from "effect"
 import { MnemoApi } from "./api.js"
-import { RoomsApiLive } from "./handlers.js"
-import { RoomManager, RoomManagerLive, type RoomEvent } from "./RoomManager.js"
+import { RoomsApiLive, AgentApiLive } from "./handlers.js"
+import { RoomManager, RoomManagerLive, type RoomEvent, type AgentEvent } from "./RoomManager.js"
 import { model } from "@mnemo/harness"
 import {
   Erc8004MockLayer,
@@ -75,7 +75,7 @@ const useVenice = !!VENICE_API_KEY
 const llmLayer = model({
   apiKey: apiKey || "missing-api-key",
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
-  model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
+  model: useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat",
   temperature: 0.3,
   maxTokens: 4096,
 })
@@ -99,9 +99,10 @@ const RoomManagerWithDeps = RoomManagerLive.pipe(
 
 const MnemoApiLive = HttpApiBuilder.api(MnemoApi)
 
-// Wire: RoomManagerWithDeps → RoomsApiLive → MnemoApiLive
+// Wire: RoomManagerWithDeps → RoomsApiLive + AgentApiLive → MnemoApiLive
 const RoomsApiWithDeps = Layer.provide(RoomsApiLive, RoomManagerWithDeps)
-const ApiLive = Layer.provide(MnemoApiLive, RoomsApiWithDeps)
+const AgentApiWithDeps = Layer.provide(AgentApiLive, RoomManagerWithDeps)
+const ApiLive = Layer.provide(MnemoApiLive, Layer.mergeAll(RoomsApiWithDeps, AgentApiWithDeps))
 
 // Build a web handler from the Effect API
 const { handler: apiHandler, dispose } = HttpApiBuilder.toWebHandler(
@@ -115,7 +116,18 @@ const { handler: apiHandler, dispose } = HttpApiBuilder.toWebHandler(
 // Bun.serve — routes + API handler + WebSocket
 // ---------------------------------------------------------------------------
 
-const server = Bun.serve<{ roomId: string }>({
+// ---------------------------------------------------------------------------
+// Start the autonomous agent on boot
+// ---------------------------------------------------------------------------
+
+Effect.runFork(
+  Effect.gen(function* () {
+    const mgr = yield* RoomManager
+    yield* mgr.startAgent()
+  }).pipe(Effect.provide(RoomManagerWithDeps as any)) as any,
+)
+
+const server = Bun.serve<{ roomId: string; isAgent?: boolean }>({
   port: Number(process.env.PORT ?? 3000),
 
   // Bun HTML imports: "/" serves the bundled index.html with auto-bundled TSX/CSS
@@ -131,7 +143,14 @@ const server = Bun.serve<{ roomId: string }>({
   async fetch(req, server) {
     const url = new URL(req.url)
 
-    // WebSocket upgrade
+    // WebSocket upgrade — agent events stream
+    if (url.pathname === "/ws/agent") {
+      const upgraded = server.upgrade(req, { data: { roomId: "__agent__", isAgent: true } })
+      if (upgraded) return undefined as unknown as Response
+      return new Response("WebSocket upgrade failed", { status: 400 })
+    }
+
+    // WebSocket upgrade — room events stream
     if (url.pathname.startsWith("/ws/")) {
       const roomId = url.pathname.slice(4)
       const upgraded = server.upgrade(req, { data: { roomId } })
@@ -151,9 +170,36 @@ const server = Bun.serve<{ roomId: string }>({
 
   websocket: {
     open(ws) {
-      const { roomId } = ws.data
+      const { roomId, isAgent } = ws.data
 
-      // Subscribe to room's PubSub and stream turns to the client.
+      // --- Agent WebSocket: subscribe to agent events ---
+      if (isAgent) {
+        const agentProgram = Effect.scoped(
+          Effect.gen(function* () {
+            const mgr = yield* RoomManager
+            const agentPubsub = yield* mgr.subscribeAgent()
+
+            // Send current status immediately
+            const status = mgr.getAgentStatus()
+            ws.send(JSON.stringify({
+              type: "agent_status",
+              data: { status: status.status, protocolId: status.currentProtocol },
+            }))
+
+            // Subscribe and stream
+            const queue = yield* PubSub.subscribe(agentPubsub)
+            while (true) {
+              const event = yield* Queue.take(queue)
+              ws.send(JSON.stringify(event))
+            }
+          }),
+        )
+
+        Effect.runFork(agentProgram.pipe(Effect.provide(RoomManagerWithDeps as any)) as any)
+        return
+      }
+
+      // --- Room WebSocket: subscribe to room events ---
       const program = Effect.scoped(
         Effect.gen(function* () {
           const mgr = yield* RoomManager
@@ -260,7 +306,10 @@ if (!apiKey) {
   console.warn("  WARNING: No LLM API key set. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
 }
 console.log(`  Chain layers: ERC-8004=${process.env.ERC8004_ADDRESS ? "live" : "mock"}, Registry=${process.env.REGISTRY_ADDRESS ? "live" : "mock"}, Escrow=${process.env.ESCROW_ADDRESS ? "live" : "mock"}`)
-console.log(`  LLM provider: ${useVenice ? "Venice" : "OpenRouter"} (${useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat"})`)
+console.log(`  LLM provider: ${useVenice ? "Venice" : "OpenRouter"} (${useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat"})`)
+console.log(`  Autonomous agent: ACTIVE — polling registry every 5s`)
+console.log(`  Agent WebSocket: ws://localhost:${server.port}/ws/agent`)
+console.log(`  Agent REST: http://localhost:${server.port}/api/agent/status`)
 
 // Graceful shutdown
 process.on("SIGINT", async () => {
