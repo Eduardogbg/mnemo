@@ -4,6 +4,9 @@
  * - REST endpoints via Effect HttpApi (POST /api/rooms, GET /api/rooms/:id, GET /api/challenges)
  * - WebSocket via Bun-native upgrade
  * - Frontend: Bun HTML imports (auto-bundles TSX/CSS)
+ *
+ * Provides the full layer stack for the 10-step pipeline:
+ *   Erc8004 | Registry | Escrow | LanguageModel
  */
 // Load .env from project root (Bun only auto-loads from cwd)
 import * as path from "node:path"
@@ -24,9 +27,71 @@ import { Effect, Layer, PubSub, Queue } from "effect"
 import { MnemoApi } from "./api.js"
 import { RoomsApiLive } from "./handlers.js"
 import { RoomManager, RoomManagerLive, type RoomEvent } from "./RoomManager.js"
+import { model } from "@mnemo/harness"
+import {
+  Erc8004MockLayer,
+  Erc8004LiveLayer,
+  RegistryMockLayer,
+  RegistryLiveLayer,
+  EscrowMockLayer,
+  EscrowLiveLayer,
+} from "@mnemo/chain"
 
 // Bun HTML import — triggers the built-in bundler for TSX/CSS
 import index from "../ui/index.html"
+
+// ---------------------------------------------------------------------------
+// Environment config
+// ---------------------------------------------------------------------------
+
+const RPC_URL = process.env.RPC_URL ?? "http://localhost:8545"
+const PRIVATE_KEY = process.env.PRIVATE_KEY ?? "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+const VENICE_API_KEY = process.env.VENICE_API_KEY ?? ""
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
+
+// ---------------------------------------------------------------------------
+// Chain layers — live if contract addresses set, otherwise mock
+// ---------------------------------------------------------------------------
+
+const erc8004Layer = process.env.ERC8004_ADDRESS
+  ? Erc8004LiveLayer(PRIVATE_KEY, RPC_URL)
+  : Erc8004MockLayer()
+
+const registryLayer = process.env.REGISTRY_ADDRESS
+  ? RegistryLiveLayer(PRIVATE_KEY, process.env.REGISTRY_ADDRESS, RPC_URL)
+  : RegistryMockLayer()
+
+const escrowLayer = process.env.ESCROW_ADDRESS
+  ? EscrowLiveLayer(PRIVATE_KEY, process.env.ESCROW_ADDRESS, RPC_URL)
+  : EscrowMockLayer()
+
+// ---------------------------------------------------------------------------
+// LLM layer — Venice primary, OpenRouter fallback
+// ---------------------------------------------------------------------------
+
+const apiKey = VENICE_API_KEY || OPENROUTER_API_KEY
+const useVenice = !!VENICE_API_KEY
+
+const llmLayer = model({
+  apiKey: apiKey || "missing-api-key",
+  baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
+  model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
+  temperature: 0.3,
+  maxTokens: 4096,
+})
+
+// ---------------------------------------------------------------------------
+// Compose RoomManager with all dependencies
+// ---------------------------------------------------------------------------
+
+const chainLayers = Layer.mergeAll(erc8004Layer, registryLayer, escrowLayer)
+
+// RoomManagerLive requires Erc8004 | Registry | Escrow | LanguageModel
+// model() provides LanguageModel when used with Effect.provide
+const RoomManagerWithDeps = RoomManagerLive.pipe(
+  Layer.provide(chainLayers),
+  Layer.provide(llmLayer),
+)
 
 // ---------------------------------------------------------------------------
 // Effect HttpApi layer stack
@@ -34,8 +99,8 @@ import index from "../ui/index.html"
 
 const MnemoApiLive = HttpApiBuilder.api(MnemoApi)
 
-// Wire: RoomManagerLive → RoomsApiLive → MnemoApiLive
-const RoomsApiWithDeps = Layer.provide(RoomsApiLive, RoomManagerLive)
+// Wire: RoomManagerWithDeps → RoomsApiLive → MnemoApiLive
+const RoomsApiWithDeps = Layer.provide(RoomsApiLive, RoomManagerWithDeps)
 const ApiLive = Layer.provide(MnemoApiLive, RoomsApiWithDeps)
 
 // Build a web handler from the Effect API
@@ -43,7 +108,7 @@ const { handler: apiHandler, dispose } = HttpApiBuilder.toWebHandler(
   Layer.mergeAll(
     ApiLive,
     BunHttpServer.layerContext,
-  ),
+  ) as any,
 )
 
 // ---------------------------------------------------------------------------
@@ -102,6 +167,39 @@ const server = Bun.serve<{ roomId: string }>({
           // Send existing state first
           const status = mgr.getStatus(roomId)
           if (status._tag === "Some") {
+            // Send phase state
+            if (status.value.currentPhase) {
+              ws.send(JSON.stringify({ type: "phase", data: status.value.currentPhase }))
+            }
+            // Send identity
+            if (status.value.identity) {
+              ws.send(JSON.stringify({ type: "identity", data: status.value.identity }))
+            }
+            // Send attestation
+            if (status.value.attestation) {
+              ws.send(JSON.stringify({ type: "attestation", data: status.value.attestation }))
+            }
+            // Send registry
+            if (status.value.registry) {
+              ws.send(JSON.stringify({ type: "registry", data: status.value.registry }))
+            }
+            // Send discovery
+            if (status.value.discovery) {
+              ws.send(JSON.stringify({ type: "discovery", data: status.value.discovery }))
+            }
+            // Send audit (full text, not deltas)
+            if (status.value.audit) {
+              ws.send(JSON.stringify({
+                type: "audit",
+                data: {
+                  status: "done",
+                  model: status.value.audit.model,
+                  text: status.value.audit.text,
+                  latencyMs: status.value.audit.latencyMs,
+                },
+              }))
+            }
+            // Send turns
             for (const turn of status.value.turns) {
               ws.send(JSON.stringify({ type: "turn", data: turn }))
             }
@@ -110,6 +208,10 @@ const server = Bun.serve<{ roomId: string }>({
             }
             if (status.value.escrow) {
               ws.send(JSON.stringify({ type: "escrow", data: status.value.escrow }))
+            }
+            // Send reputation events
+            for (const rep of status.value.reputation) {
+              ws.send(JSON.stringify({ type: "reputation", data: rep }))
             }
             if (status.value.ipfs) {
               ws.send(JSON.stringify({ type: "ipfs", data: status.value.ipfs }))
@@ -133,34 +235,20 @@ const server = Bun.serve<{ roomId: string }>({
           // Subscribe to events (PubSub.subscribe is scoped — the outer Effect.scoped handles it)
           const queue = yield* PubSub.subscribe(pubsub)
 
-          // Consume events from the queue
+          // Consume events from the queue — close on outcome
           while (true) {
             const event = yield* Queue.take(queue)
             ws.send(JSON.stringify(event))
 
-            // Check if room finished after a turn event
-            if (event.type === "turn") {
-              const s = mgr.getStatus(roomId)
-              if (s._tag === "Some" && s.value.result) {
-                ws.send(JSON.stringify({
-                  type: "outcome",
-                  data: {
-                    ...s.value.result,
-                    evidence: s.value.evidence,
-                    verification: s.value.verification,
-                    escrow: s.value.escrow,
-                    ipfs: s.value.ipfs,
-                  },
-                }))
-                ws.close()
-                return
-              }
+            if (event.type === "outcome") {
+              ws.close()
+              return
             }
           }
         }),
       )
 
-      Effect.runFork(program.pipe(Effect.provide(RoomManagerLive)))
+      Effect.runFork(program.pipe(Effect.provide(RoomManagerWithDeps as any)) as any)
     },
     message() { /* client doesn't send messages */ },
     close() { /* cleanup handled by fiber scope */ },
@@ -168,6 +256,11 @@ const server = Bun.serve<{ roomId: string }>({
 })
 
 console.log(`Mnemo demo server running at http://localhost:${server.port}`)
+if (!apiKey) {
+  console.warn("  WARNING: No LLM API key set. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
+}
+console.log(`  Chain layers: ERC-8004=${process.env.ERC8004_ADDRESS ? "live" : "mock"}, Registry=${process.env.REGISTRY_ADDRESS ? "live" : "mock"}, Escrow=${process.env.ESCROW_ADDRESS ? "live" : "mock"}`)
+console.log(`  LLM provider: ${useVenice ? "Venice" : "OpenRouter"} (${useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat"})`)
 
 // Graceful shutdown
 process.on("SIGINT", async () => {

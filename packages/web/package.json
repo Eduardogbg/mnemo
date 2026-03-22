@@ -9,13 +9,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "effect": "^3.19.14",
+    "@effect/ai": "^0.33.2",
+    "@effect/experimental": "^0.58.0",
     "@effect/platform": "^0.94.1",
     "@effect/platform-bun": "^0.59.0",
+    "@effect/rpc": "^0.73.0",
     "@mnemo/chain": "workspace:*",
+    "@mnemo/core": "workspace:*",
     "@mnemo/dvdefi": "workspace:*",
     "@mnemo/harness": "workspace:*",
     "@mnemo/verifier": "workspace:*",
+    "@tanstack/react-query": "^5.94.5",
+    "effect": "^3.19.14",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

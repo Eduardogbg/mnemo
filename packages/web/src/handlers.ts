@@ -56,6 +56,18 @@ export const RoomsApiLive = HttpApiBuilder.group(MnemoApi, "rooms", (handlers) =
               })
             : Option.none(),
           ipfs: s.ipfs ? Option.some(s.ipfs) : Option.none(),
+          identity: s.identity ? Option.some(s.identity) : Option.none(),
+          attestation: s.attestation ? Option.some(s.attestation) : Option.none(),
+          registry: s.registry ? Option.some(s.registry) : Option.none(),
+          discovery: s.discovery ? Option.some(s.discovery) : Option.none(),
+          audit: s.audit ? Option.some(s.audit) : Option.none(),
+          reputation: s.reputation.map((r) => ({
+            agentId: r.agentId,
+            role: r.role,
+            value: r.value,
+            txHash: r.txHash,
+          })),
+          currentPhase: s.currentPhase ? Option.some(s.currentPhase) : Option.none(),
         }
       })
     )

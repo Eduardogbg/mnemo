@@ -51,6 +51,49 @@ export class IpfsSchema extends Schema.Class<IpfsSchema>("IpfsSchema")({
   url: Schema.String,
 }) {}
 
+export class IdentitySchema extends Schema.Class<IdentitySchema>("IdentitySchema")({
+  protocolAgentId: Schema.String,
+  researcherAgentId: Schema.String,
+}) {}
+
+export class AttestationSchema extends Schema.Class<AttestationSchema>("AttestationSchema")({
+  quote: Schema.String,
+  rtmr3: Schema.String,
+}) {}
+
+export class RegistrySchema extends Schema.Class<RegistrySchema>("RegistrySchema")({
+  protocolId: Schema.String,
+  metadataURI: Schema.String,
+  maxBounty: Schema.String,
+  txHash: Schema.String,
+}) {}
+
+export class DiscoverySchema extends Schema.Class<DiscoverySchema>("DiscoverySchema")({
+  protocolId: Schema.String,
+  name: Schema.String,
+  bounty: Schema.String,
+  slotsScanned: Schema.Number,
+}) {}
+
+export class AuditSchema extends Schema.Class<AuditSchema>("AuditSchema")({
+  model: Schema.String,
+  text: Schema.String,
+  latencyMs: Schema.Number,
+}) {}
+
+export class ReputationSchema extends Schema.Class<ReputationSchema>("ReputationSchema")({
+  agentId: Schema.String,
+  role: Schema.String,
+  value: Schema.Number,
+  txHash: Schema.String,
+}) {}
+
+export class PhaseSchema extends Schema.Class<PhaseSchema>("PhaseSchema")({
+  step: Schema.Number,
+  name: Schema.String,
+  status: Schema.Literal("start", "done", "error"),
+}) {}
+
 export class RoomStatus extends Schema.Class<RoomStatus>("RoomStatus")({
   roomId: Schema.String,
   status: Schema.Literal("running", "finished"),
@@ -62,6 +105,13 @@ export class RoomStatus extends Schema.Class<RoomStatus>("RoomStatus")({
   verification: Schema.optionalWith(VerificationSchema, { as: "Option" }),
   escrow: Schema.optionalWith(EscrowSchema, { as: "Option" }),
   ipfs: Schema.optionalWith(IpfsSchema, { as: "Option" }),
+  identity: Schema.optionalWith(IdentitySchema, { as: "Option" }),
+  attestation: Schema.optionalWith(AttestationSchema, { as: "Option" }),
+  registry: Schema.optionalWith(RegistrySchema, { as: "Option" }),
+  discovery: Schema.optionalWith(DiscoverySchema, { as: "Option" }),
+  audit: Schema.optionalWith(AuditSchema, { as: "Option" }),
+  reputation: Schema.Array(ReputationSchema),
+  currentPhase: Schema.optionalWith(PhaseSchema, { as: "Option" }),
 }) {}
 
 export class ChallengeInfo extends Schema.Class<ChallengeInfo>("ChallengeInfo")({
