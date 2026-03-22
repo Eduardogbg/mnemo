@@ -97,6 +97,7 @@
 | [contracts/src/MnemoReputation.sol](contracts/src/MnemoReputation.sol) | **ERC-8004 reputation wrapper** — asymmetric detail (researcher gets severity, protocol gets outcome only), double-post prevention |
 | [contracts/src/MnemoRegistry.sol](contracts/src/MnemoRegistry.sol) | **Protocol discovery registry** — register/update/deactivate, 14 tests |
 | [contracts/script/Deploy.s.sol](contracts/script/Deploy.s.sol) | Deployment script for Base Sepolia (Escrow + Reputation + Registry) |
+| [contracts/foundry.toml](contracts/foundry.toml) | Foundry config — Base Sepolia RPC, Basescan verification, via_ir |
 | [contracts/test/](contracts/test/) | 40 tests (18 escrow + 8 reputation + 14 registry), all passing |
 
 ## Infrastructure
