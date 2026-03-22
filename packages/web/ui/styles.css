@@ -1,3 +1,8 @@
+@import "tailwindcss";
+
+@source "./";
+@source "./components/";
+
 @theme {
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -22,4 +27,22 @@
 }
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
+}
+
+/* Slow spin for pipeline running indicator */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 1.5s linear infinite;
+}
+
+/* Blinking cursor for streaming text */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-blink {
+  animation: blink 0.8s step-end infinite;
 }

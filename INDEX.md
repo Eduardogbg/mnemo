@@ -87,7 +87,7 @@
 | [packages/researcher/](packages/researcher/) | **Researcher agent** — autonomous 5-phase loop, execution log, unified E2E demo (`e2e-discovery.ts`) |
 | [packages/harness/](packages/harness/) | Agent harness — room-based negotiation, provider abstraction (OpenRouter, mock) |
 | [packages/venice/](packages/venice/) | Venice E2EE client — ECDH key exchange, AES-256-GCM encryption |
-| [packages/web/](packages/web/) | Demo frontend & API server — Effect HttpApi, Bun, React 19, real-time WebSocket |
+| [packages/web/](packages/web/) | Demo frontend & API server — Effect HttpApi, Bun, React 19, real-time WebSocket, 10-step PipelineTracker, AuditPanel, two-column layout |
 
 ## Contracts
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 interface Challenge {
   id: string
@@ -18,23 +18,30 @@ const difficultyColor: Record<string, string> = {
   hard: "text-red-400 border-red-400/30",
 }
 
+async function fetchChallenges(): Promise<Challenge[]> {
+  const res = await fetch("/api/challenges")
+  if (!res.ok) throw new Error(`Failed to fetch challenges: ${res.status}`)
+  const data = (await res.json()) as { challenges: Challenge[] }
+  return data.challenges
+}
+
 export function ChallengePicker({ onSelect }: Props) {
-  const [challenges, setChallenges] = useState<Challenge[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: challenges, isLoading, isError, error } = useQuery({
+    queryKey: ["challenges"],
+    queryFn: fetchChallenges,
+  })
 
-  useEffect(() => {
-    fetch("/api/challenges")
-      .then((r) => r.json())
-      .then((data: { challenges: Challenge[] }) => {
-        setChallenges(data.challenges)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className="text-zinc-500 text-center py-12">Loading challenges…</div>
+      <div className="text-zinc-500 text-center py-12">Loading challenges...</div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="text-red-400 text-center py-12 text-sm font-mono">
+        Failed to load challenges: {error instanceof Error ? error.message : "Unknown error"}
+      </div>
     )
   }
 
@@ -42,7 +49,7 @@ export function ChallengePicker({ onSelect }: Props) {
     <div>
       <h2 className="text-lg font-medium text-zinc-200 mb-4">Choose a challenge</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {challenges.map((c) => (
+        {(challenges ?? []).map((c) => (
           <button
             key={c.id}
             onClick={() => onSelect(c.id, c.name)}
