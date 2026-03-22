@@ -82,6 +82,57 @@ interface DeployedAddresses {
   readonly registry: string
 }
 
+/** A typed constructor argument for proper ABI encoding. */
+interface ConstructorArg {
+  readonly type: "address" | "uint256" | "bytes32" | "bool"
+  readonly value: string | bigint | boolean
+}
+
+// ---------------------------------------------------------------------------
+// ABI Encoding
+// ---------------------------------------------------------------------------
+
+/**
+ * Encode a value according to its Solidity ABI type into a 32-byte hex word.
+ *
+ * This replaces manual `.padStart(64, "0")` with explicit type-aware encoding.
+ * Covers the static types used by Mnemo constructors; extend as needed.
+ */
+const encodeAbiValue = (arg: ConstructorArg): string => {
+  switch (arg.type) {
+    case "address": {
+      const hex = String(arg.value).replace(/^0x/i, "").toLowerCase()
+      if (hex.length > 40) throw new Error(`Invalid address: too long (${hex.length} hex chars)`)
+      // ABI: address is left-padded to 32 bytes (64 hex chars)
+      return hex.padStart(64, "0")
+    }
+    case "uint256": {
+      const n = typeof arg.value === "bigint" ? arg.value : BigInt(String(arg.value))
+      if (n < 0n) throw new Error("uint256 cannot be negative")
+      const hex = n.toString(16)
+      if (hex.length > 64) throw new Error(`uint256 overflow: ${hex.length} hex chars`)
+      return hex.padStart(64, "0")
+    }
+    case "bytes32": {
+      const hex = String(arg.value).replace(/^0x/i, "")
+      if (hex.length !== 64) throw new Error(`bytes32 must be exactly 32 bytes, got ${hex.length / 2}`)
+      return hex
+    }
+    case "bool": {
+      return (arg.value ? "1" : "0").padStart(64, "0")
+    }
+    default:
+      throw new Error(`Unsupported ABI type: ${(arg as any).type}`)
+  }
+}
+
+/**
+ * Encode an array of typed constructor arguments into a single hex string
+ * suitable for appending to deployment bytecode or passing to forge verify.
+ */
+const encodeConstructorArgs = (args: readonly ConstructorArg[]): string =>
+  args.map(encodeAbiValue).join("")
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -200,12 +251,16 @@ const forgeBuild: Effect.Effect<void, DeployError> = Effect.gen(function* () {
 /**
  * Deploy a contract by sending a raw deployment transaction through
  * voltaire-effect's SignerService. Constructor args are ABI-encoded
- * (addresses left-padded to 32 bytes) and appended to the bytecode.
+ * using `encodeConstructorArgs` and appended to the bytecode.
+ *
+ * NOTE: voltaire-effect v1.1.0 adds a proper `deployContract` action with
+ * full ABI-aware encoding via `Constructor.encodeParams`. Once the project
+ * upgrades from v1.0.1, this function can be replaced with that.
  */
 const deployContract = (
   name: string,
   artifact: ContractArtifact,
-  constructorArgs?: readonly string[],
+  constructorArgs?: readonly ConstructorArg[],
 ): Effect.Effect<{ address: string; txHash: string }, DeployError, SignerService> =>
   Effect.gen(function* () {
     const signer = yield* SignerService
@@ -214,10 +269,7 @@ const deployContract = (
     let data = artifact.bytecode.object as `0x${string}`
 
     if (constructorArgs && constructorArgs.length > 0) {
-      // All Mnemo constructor args are addresses — left-pad to 32 bytes
-      const encoded = constructorArgs
-        .map((arg) => String(arg).replace("0x", "").toLowerCase().padStart(64, "0"))
-        .join("")
+      const encoded = encodeConstructorArgs(constructorArgs)
       data = `${data}${encoded}` as `0x${string}`
     }
 
@@ -400,7 +452,10 @@ const program = Effect.gen(function* () {
   const reputation = yield* deployContract(
     "MnemoReputation",
     reputationArt,
-    [config.reputationRegistry, escrow.address],
+    [
+      { type: "address", value: config.reputationRegistry },
+      { type: "address", value: escrow.address },
+    ],
   ).pipe(Effect.provide(writeStack))
 
   yield* Console.log("[6/6] Deploying MnemoRegistry...")
@@ -446,9 +501,10 @@ const program = Effect.gen(function* () {
 
     yield* verifyOnBasescan("MnemoEscrow", escrow.address, undefined, config.basescanApiKey)
 
-    const reputationCtorArgs =
-      config.reputationRegistry.replace("0x", "").padStart(64, "0") +
-      escrow.address.replace("0x", "").padStart(64, "0")
+    const reputationCtorArgs = encodeConstructorArgs([
+      { type: "address", value: config.reputationRegistry },
+      { type: "address", value: escrow.address },
+    ])
     yield* verifyOnBasescan("MnemoReputation", reputation.address, reputationCtorArgs, config.basescanApiKey)
 
     yield* verifyOnBasescan("MnemoRegistry", registry.address, undefined, config.basescanApiKey)
