@@ -229,7 +229,7 @@ const DVDEFI_ROOT = path.resolve(import.meta.dir, "../../../repos/damn-vulnerabl
 // Constants
 // ---------------------------------------------------------------------------
 
-const AUDIT_MODEL = process.env.VENICE_API_KEY ? "deepseek-v3.2" : "deepseek/deepseek-chat"
+const AUDIT_MODEL = process.env.VENICE_API_KEY ? "qwen3-coder-480b-a35b-instruct" : "deepseek/deepseek-chat"
 const MAX_BOUNTY = 10000000000000000000n // 10 ETH in wei
 
 /** Map metadataURI → challengeId for auto-detection by the agent. */

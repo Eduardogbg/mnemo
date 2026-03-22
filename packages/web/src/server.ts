@@ -75,7 +75,7 @@ const useVenice = !!VENICE_API_KEY
 const llmLayer = model({
   apiKey: apiKey || "missing-api-key",
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
-  model: useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat",
+  model: useVenice ? "qwen3-coder-480b-a35b-instruct" : "deepseek/deepseek-chat",
   temperature: 0.3,
   maxTokens: 4096,
 })
@@ -325,7 +325,7 @@ if (!apiKey) {
   console.warn("  WARNING: No LLM API key set. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
 }
 console.log(`  Chain layers: ERC-8004=${process.env.ERC8004_ADDRESS ? "live" : "mock"}, Registry=${process.env.REGISTRY_ADDRESS ? "live" : "mock"}, Escrow=${process.env.ESCROW_ADDRESS ? "live" : "mock"}`)
-console.log(`  LLM provider: ${useVenice ? "Venice" : "OpenRouter"} (${useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat"})`)
+console.log(`  LLM provider: ${useVenice ? "Venice" : "OpenRouter"} (${useVenice ? "qwen3-coder-480b-a35b-instruct" : "deepseek/deepseek-chat"})`)
 console.log(`  Autonomous agent: ACTIVE — polling registry every 5s`)
 console.log(`  Agent WebSocket: ws://localhost:${server.port}/ws/agent`)
 console.log(`  Agent REST: http://localhost:${server.port}/api/agent/status`)

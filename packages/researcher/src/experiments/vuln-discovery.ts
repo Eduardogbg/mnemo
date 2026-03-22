@@ -31,7 +31,7 @@ const useVenice = !!VENICE_API_KEY
 const providerConfig: ChatCompletionsConfig = {
   apiKey,
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
-  model: useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat",
+  model: useVenice ? "qwen3-coder-480b-a35b-instruct" : "deepseek/deepseek-chat",
   temperature: 0.3,
   maxTokens: 4096,
 }
