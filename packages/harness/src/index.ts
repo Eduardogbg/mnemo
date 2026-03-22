@@ -4,21 +4,16 @@
  * Re-exports @mnemo/core for convenience.
  */
 
-// Re-export all of @mnemo/core for downstream convenience
+// Re-export @mnemo/core
 export {
-  ProviderError,
   AgentError,
   StateError,
-  type ToolDefinition,
-  type ToolCall,
-  type GenerateTextResult,
   isValidSeverity,
-  Provider,
-  OpenRouterLayer,
-  layerFromConfig,
-  mockLayer,
-  type ProviderConfig,
-  type ProviderService,
+  model,
+  VeniceModel,
+  OpenRouterModel,
+  mockModel,
+  type ChatCompletionsConfig,
   State,
   InMemoryLayer,
   type StateService,
@@ -32,14 +27,22 @@ export {
   type AgentService,
 } from "@mnemo/core"
 
-// Harness-specific: Room
+// Harness-specific: Errors
 export { RoomError } from "./Errors.js"
 
+// Harness-specific: Tools (Tool.make + Toolkit.make)
 export {
-  verifierTools,
-  proverTools,
+  ApproveBug,
+  RejectBug,
+  AcceptSeverity,
+  RejectSeverity,
+  verifierToolkit,
+  proverToolkit,
+  verifierHandlersLayer,
+  proverHandlersLayer,
 } from "./tools.js"
 
+// Harness-specific: Room
 export {
   Room,
   makeRoom,
