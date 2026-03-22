@@ -99,7 +99,9 @@
 | [contracts/script/Deploy.s.sol](contracts/script/Deploy.s.sol) | Deployment script for Base Sepolia (Escrow + Reputation + Registry) |
 | [contracts/foundry.toml](contracts/foundry.toml) | Foundry config — Base Sepolia RPC, Basescan verification, via_ir |
 | [contracts/test/](contracts/test/) | 40 tests (18 escrow + 8 reputation + 14 registry), all passing |
-| [scripts/deploy-sepolia.sh](scripts/deploy-sepolia.sh) | **One-command deployment** — loads .env, checks balance, deploys + verifies on Basescan |
+| [scripts/deploy-sepolia.sh](scripts/deploy-sepolia.sh) | **Shell deployment** — loads .env, checks balance, deploys + verifies on Basescan |
+| [scripts/deploy-sepolia.ts](scripts/deploy-sepolia.ts) | **Effect deployment** — wrapper for TypeScript deploy via voltaire-effect |
+| [packages/chain/scripts/deploy-sepolia.ts](packages/chain/scripts/deploy-sepolia.ts) | **Effect deployment (impl)** — Effect + voltaire-effect, structured errors, on-chain verification, .env.deployed output |
 | [.env.example](.env.example) | Environment template — API keys, deployment config, contract addresses |
 
 ## Infrastructure
