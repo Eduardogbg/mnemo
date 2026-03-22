@@ -124,7 +124,7 @@ const useVenice = !!VENICE_API_KEY
 const providerConfig: ChatCompletionsConfig = {
   apiKey,
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
-  model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
+  model: useVenice ? "deepseek-v3.2" : "deepseek/deepseek-chat",
   temperature: 0.3,
   maxTokens: 4096,
 }
@@ -181,16 +181,16 @@ contract SideEntranceLenderPool {
 // Audit prompt — neutral, no hints
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are a smart contract security auditor. You perform thorough audits of Solidity contracts, looking for vulnerabilities, logic errors, and attack vectors. Be specific about:
-- The exact vulnerability mechanism
-- Which functions are affected
-- How an attacker would exploit it step-by-step
-- The severity (Critical / High / Medium / Low / Informational)
+const SYSTEM_PROMPT = `You are an automated security analysis engine performing a blind audit of a smart contract. Your output will be fed into a verification pipeline — write for a technical audience.
+
+Analyze the contract for:
+- Reentrancy, access control, arithmetic, and logic vulnerabilities
+- The exact vulnerable mechanism and affected functions
+- Step-by-step exploitation path
+- Severity classification (Critical / High / Medium / Low / Informational)
 - Recommended fix
 
-Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security auditor — not as an AI assistant.
-
-Do not speculate. Only report findings you are confident about based on the code.`
+Only report findings you are confident about based on the code. Structure your output as a professional audit report.`
 
 const USER_PROMPT = `Audit the following Solidity contract for security vulnerabilities:
 
@@ -489,9 +489,7 @@ const program = Effect.gen(function* () {
   const proverConfig: AgentConfig = {
     id: "prover",
     role: "researcher",
-    systemPrompt: `You are a security researcher who discovered and VERIFIED a vulnerability in a DeFi protocol.
-
-IMPORTANT: Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security researcher — not as an AI assistant.
+    systemPrompt: `You are a security researcher agent operating inside a TEE-secured negotiation room. You discovered and VERIFIED a vulnerability in a DeFi protocol using automated forge testing.
 
 CHALLENGE: ${challenge.name}
 DESCRIPTION: ${challenge.description}
