@@ -185,15 +185,15 @@ export function AuditPanel({ model, text, status, latencyMs }: Props) {
   const rendered = useMemo(() => renderMarkdown(text), [text])
 
   return (
-    <div className="flex flex-col max-h-[70vh]">
+    <div className="flex flex-col" style={{ maxHeight: "calc(100vh - 8rem)" }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800/80">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/80 flex-shrink-0">
         <h3 className="text-xs font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-2">
           <span className={`inline-block w-1.5 h-1.5 rounded-full ${status === "running" ? "bg-amber-400 glow-amber" : "bg-emerald-400 glow-green"}`} />
           LLM Audit
         </h3>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700">
             {model}
           </span>
           {status === "running" && (
@@ -212,7 +212,7 @@ export function AuditPanel({ model, text, status, latencyMs }: Props) {
       {/* Body — markdown rendered */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-5 py-4 text-xs font-mono leading-relaxed"
+        className="flex-1 overflow-y-auto px-4 py-3 text-xs font-mono leading-relaxed"
       >
         {text ? (
           rendered
@@ -226,7 +226,7 @@ export function AuditPanel({ model, text, status, latencyMs }: Props) {
 
       {/* Footer */}
       {status === "done" && latencyMs != null && (
-        <div className="px-5 py-2.5 border-t border-zinc-800/80 flex items-center justify-between bg-zinc-950/30">
+        <div className="px-4 py-1.5 border-t border-zinc-800/80 flex items-center justify-between bg-zinc-950/30 flex-shrink-0">
           <span className="text-[10px] text-zinc-500 font-mono">
             Completed in {(latencyMs / 1000).toFixed(1)}s
           </span>

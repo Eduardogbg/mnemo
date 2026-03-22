@@ -304,15 +304,16 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (action.data.status === "delta") {
         return {
           ...state,
+          auditModel: state.auditModel || action.data.model,
           auditText: state.auditText + (action.data.text ?? ""),
         }
       }
-      // done
+      // done — if text is provided, use it as the authoritative full text
       return {
         ...state,
         auditStatus: "done",
         auditLatencyMs: action.data.latencyMs,
-        auditText: action.data.text != null ? state.auditText + action.data.text : state.auditText,
+        auditText: action.data.text != null ? action.data.text : state.auditText,
       }
     }
 
@@ -591,11 +592,18 @@ export function App() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {/* Inline agent indicator when pipeline is running */}
             {state.phase === "running" && (
-              <span className="flex items-center gap-2 text-xs font-mono text-amber-400 bg-amber-400/10 px-3 py-1 rounded-full ring-1 ring-amber-400/20">
-                <span className="inline-block w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse glow-amber" />
-                Live
-              </span>
+              <>
+                <span className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${state.agentConnected ? "bg-emerald-400" : "bg-red-400"}`} />
+                  Agent: {AGENT_STATUS_CONFIG[state.agentStatus].label.toLowerCase()}
+                </span>
+                <span className="flex items-center gap-2 text-xs font-mono text-amber-400 bg-amber-400/10 px-3 py-1 rounded-full ring-1 ring-amber-400/20">
+                  <span className="inline-block w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse glow-amber" />
+                  Live
+                </span>
+              </>
             )}
             {state.phase === "done" && (
               <span className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full ring-1 ring-emerald-400/20">
@@ -607,14 +615,16 @@ export function App() {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Agent status bar — always visible */}
-        <AgentStatusBar
-          status={state.agentStatus}
-          protocol={state.agentProtocol}
-          logs={state.agentLogs}
-          connected={state.agentConnected}
-        />
+      <div className={`max-w-7xl mx-auto px-6 ${state.phase === "running" ? "py-4" : "py-8"}`}>
+        {/* Agent status bar — show full card only when NOT running pipeline */}
+        {state.phase !== "running" && (
+          <AgentStatusBar
+            status={state.agentStatus}
+            protocol={state.agentProtocol}
+            logs={state.agentLogs}
+            connected={state.agentConnected}
+          />
+        )}
 
         {/* Watching phase — agent is idle, show challenge picker for manual trigger */}
         {state.phase === "watching" && (
@@ -645,13 +655,13 @@ export function App() {
         {state.phase !== "watching" && (
           <div>
             {/* Room status bar */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl shadow-lg shadow-black/20 px-5 py-3 mb-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center ring-1 ring-emerald-400/20">
-                  <span className="text-emerald-400 text-sm font-bold">#</span>
+            <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg shadow-sm shadow-black/20 px-4 py-2 mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded bg-emerald-400/10 flex items-center justify-center ring-1 ring-emerald-400/20">
+                  <span className="text-emerald-400 text-xs font-bold">#</span>
                 </div>
-                <div>
-                  <h2 className="text-sm font-medium text-zinc-200">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-medium text-zinc-200">
                     {state.challengeName}
                   </h2>
                   <span className="text-[10px] text-zinc-500 font-mono">
@@ -670,10 +680,10 @@ export function App() {
             </div>
 
             {/* Two-column grid */}
-            <div className="flex gap-6">
+            <div className="flex gap-4">
               {/* Left column — Pipeline */}
-              <div className="w-[300px] flex-shrink-0">
-                <div className="sticky top-20">
+              <div className="w-[280px] flex-shrink-0">
+                <div className="sticky top-14">
                   <PipelineTracker steps={state.steps} />
                 </div>
               </div>

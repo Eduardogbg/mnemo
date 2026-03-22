@@ -233,7 +233,7 @@ const server = Bun.serve<{ roomId: string; isAgent?: boolean }>({
             if (status.value.discovery) {
               ws.send(JSON.stringify({ type: "discovery", data: status.value.discovery }))
             }
-            // Send audit (full text, not deltas)
+            // Send audit — full text if done, or partial text if still streaming
             if (status.value.audit) {
               ws.send(JSON.stringify({
                 type: "audit",
@@ -244,6 +244,25 @@ const server = Bun.serve<{ roomId: string; isAgent?: boolean }>({
                   latencyMs: status.value.audit.latencyMs,
                 },
               }))
+            } else if (status.value.auditPartial) {
+              // Audit is in progress — send accumulated text so far as a "start" + single delta
+              ws.send(JSON.stringify({
+                type: "audit",
+                data: {
+                  status: "start",
+                  model: status.value.auditPartial.model,
+                },
+              }))
+              if (status.value.auditPartial.text) {
+                ws.send(JSON.stringify({
+                  type: "audit",
+                  data: {
+                    status: "delta",
+                    model: status.value.auditPartial.model,
+                    text: status.value.auditPartial.text,
+                  },
+                }))
+              }
             }
             // Send turns
             for (const turn of status.value.turns) {

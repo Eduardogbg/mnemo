@@ -62,26 +62,26 @@ function StatusIcon({ status }: { status: PipelineStep["status"] }) {
   switch (status) {
     case "done":
       return (
-        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-400/15 text-emerald-400 text-xs font-bold flex-shrink-0 glow-green">
+        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-400/15 text-emerald-400 text-[10px] font-bold flex-shrink-0 glow-green">
           &#10003;
         </span>
       )
     case "running":
       return (
-        <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-amber-400 flex-shrink-0 animate-spin-slow glow-amber">
-          <span className="block w-1.5 h-1.5 bg-amber-400 rounded-full" />
+        <span className="flex items-center justify-center w-5 h-5 rounded-full border-2 border-amber-400 flex-shrink-0 animate-spin-slow glow-amber">
+          <span className="block w-1 h-1 bg-amber-400 rounded-full" />
         </span>
       )
     case "error":
       return (
-        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-400/15 text-red-400 text-xs font-bold flex-shrink-0 glow-red">
+        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-red-400/15 text-red-400 text-[10px] font-bold flex-shrink-0 glow-red">
           &#10005;
         </span>
       )
     default:
       return (
-        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 flex-shrink-0">
-          <span className="block w-1.5 h-1.5 bg-zinc-600 rounded-full" />
+        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 flex-shrink-0">
+          <span className="block w-1 h-1 bg-zinc-600 rounded-full" />
         </span>
       )
   }
@@ -110,24 +110,24 @@ function StepRow({ step }: { step: PipelineStep }) {
   return (
     <div
       className={`
-        flex items-start gap-3 px-3 py-2.5 rounded-lg transition-all duration-200
+        flex items-start gap-2 px-2 py-1.5 rounded transition-all duration-200
         ${isActive
-          ? "bg-amber-400/5 border-l-2 border-l-amber-400 border border-amber-400/10 shadow-sm shadow-amber-400/5"
+          ? "bg-amber-400/5 border-l-2 border-l-amber-400 border border-amber-400/10"
           : isDone
-            ? "bg-zinc-900/40 border-l-2 border-l-emerald-400/40 border border-transparent hover:bg-zinc-800/40"
+            ? "bg-zinc-900/40 border-l-2 border-l-emerald-400/40 border border-transparent"
             : isError
               ? "bg-red-400/5 border-l-2 border-l-red-400 border border-red-400/10"
-              : "border-l-2 border-l-zinc-800 border border-transparent hover:bg-zinc-800/30"
+              : "border-l-2 border-l-zinc-800 border border-transparent"
         }
       `}
     >
       <StatusIcon status={step.status} />
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <StepNumber step={step.step} status={step.status} />
           <span
-            className={`text-xs ${
+            className={`text-[11px] ${
               isDone
                 ? "text-zinc-300"
                 : isActive
@@ -143,14 +143,14 @@ function StepRow({ step }: { step: PipelineStep }) {
 
         {/* Detail key-value pairs */}
         {step.detail && Object.keys(step.detail).length > 0 && (
-          <div className="mt-2 space-y-1 pl-6">
+          <div className="mt-1 space-y-0.5 pl-5">
             {Object.entries(step.detail).map(([key, value]) => (
-              <div key={key} className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-zinc-600 font-mono">{key}:</span>
+              <div key={key} className="flex items-baseline gap-1">
+                <span className="text-[9px] text-zinc-600 font-mono">{key}:</span>
                 {isHashOrAddress(value) ? (
                   <CopyableHash value={value} />
                 ) : (
-                  <span className="text-[10px] text-zinc-400 font-mono break-all">
+                  <span className="text-[9px] text-zinc-400 font-mono break-all">
                     {value}
                   </span>
                 )}
@@ -165,12 +165,12 @@ function StepRow({ step }: { step: PipelineStep }) {
 
 export function PipelineTracker({ steps }: Props) {
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl shadow-lg shadow-black/20 p-4">
-      <h3 className="text-[11px] font-mono text-zinc-400 uppercase tracking-widest mb-4 px-3 flex items-center gap-2">
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg shadow-sm shadow-black/20 p-3">
+      <h3 className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest mb-2 px-2 flex items-center gap-2">
         <span className="inline-block w-1.5 h-1.5 bg-emerald-400/60 rounded-full" />
         Pipeline
       </h3>
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {steps.map((step) => (
           <StepRow key={step.step} step={step} />
         ))}

@@ -156,6 +156,8 @@ export interface RoomEntry {
   registry: RegistryEvent | null
   discovery: DiscoveryEvent | null
   audit: { model: string; text: string; latencyMs: number } | null
+  /** Partial audit text accumulated during streaming (before audit is finalized). */
+  auditPartial: { model: string; text: string } | null
   reputation: ReputationEvent[]
   currentPhase: PhaseEvent | null
 }
@@ -200,6 +202,7 @@ export interface RoomManagerService {
     registry: RegistryEvent | null
     discovery: DiscoveryEvent | null
     audit: { model: string; text: string; latencyMs: number } | null
+    auditPartial: { model: string; text: string } | null
     reputation: ReputationEvent[]
     currentPhase: PhaseEvent | null
   }>
@@ -466,6 +469,7 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
             registry: null,
             discovery: null,
             audit: null,
+            auditPartial: null,
             reputation: [],
             currentPhase: null,
           }
@@ -580,6 +584,9 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
             const startMs = Date.now()
             let auditText = ""
 
+            // Track partial text on entry so WS state replay can send it
+            entry.auditPartial = { model: AUDIT_MODEL, text: "" }
+
             // Use streamText to get streaming deltas
             const stream = LanguageModel.streamText({
               prompt: [
@@ -592,6 +599,8 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
               Effect.gen(function* () {
                 if (part.type === "text-delta" && part.delta) {
                   auditText += part.delta
+                  // Update partial text on entry for late-joining WS clients
+                  entry.auditPartial = { model: AUDIT_MODEL, text: auditText }
                   yield* PubSub.publish(pubsub, {
                     type: "audit",
                     data: { status: "delta", model: AUDIT_MODEL, text: part.delta },
@@ -602,13 +611,16 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
 
             const latencyMs = Date.now() - startMs
 
+            // Include full text in done event so clients that missed deltas get it
             const auditDoneEvent: AuditEvent = {
               status: "done",
               model: AUDIT_MODEL,
+              text: auditText,
               latencyMs,
             }
             yield* PubSub.publish(pubsub, { type: "audit", data: auditDoneEvent })
             entry.audit = { model: AUDIT_MODEL, text: auditText, latencyMs }
+            entry.auditPartial = null // Clear partial — full audit is now available
             console.log(`[RoomManager]   Audit complete: ${latencyMs}ms, ${auditText.length} chars`)
             yield* publishPhase(pubsub, entry, 6, "audit", "done")
 
@@ -946,6 +958,7 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
           registry: entry.registry,
           discovery: entry.discovery,
           audit: entry.audit,
+          auditPartial: entry.auditPartial,
           reputation: entry.reputation,
           currentPhase: entry.currentPhase,
         })
@@ -1113,6 +1126,7 @@ const runAgentPipeline = (
       registry: null,
       discovery: null,
       audit: null,
+      auditPartial: null,
       reputation: [],
       currentPhase: null,
     }
@@ -1218,6 +1232,9 @@ const runAgentPipeline = (
       const startMs = Date.now()
       let auditText = ""
 
+      // Track partial text on entry so WS state replay can send it
+      entry.auditPartial = { model: AUDIT_MODEL, text: "" }
+
       const stream = LanguageModel.streamText({
         prompt: [
           { role: "system" as const, content: AUDIT_SYSTEM_PROMPT },
@@ -1229,6 +1246,8 @@ const runAgentPipeline = (
         Effect.gen(function* () {
           if (part.type === "text-delta" && part.delta) {
             auditText += part.delta
+            // Update partial text on entry for late-joining WS clients
+            entry.auditPartial = { model: AUDIT_MODEL, text: auditText }
             yield* PubSub.publish(pubsub, {
               type: "audit",
               data: { status: "delta", model: AUDIT_MODEL, text: part.delta },
@@ -1239,9 +1258,11 @@ const runAgentPipeline = (
 
       const latencyMs = Date.now() - startMs
 
-      const auditDoneEvent: AuditEvent = { status: "done", model: AUDIT_MODEL, latencyMs }
+      // Include full text in done event so clients that missed deltas get it
+      const auditDoneEvent: AuditEvent = { status: "done", model: AUDIT_MODEL, text: auditText, latencyMs }
       yield* PubSub.publish(pubsub, { type: "audit", data: auditDoneEvent })
       entry.audit = { model: AUDIT_MODEL, text: auditText, latencyMs }
+      entry.auditPartial = null // Clear partial — full audit is now available
       console.log(`[Agent]   Audit complete: ${latencyMs}ms, ${auditText.length} chars`)
       yield* publishPhase(pubsub, entry, 6, "audit", "done")
 
