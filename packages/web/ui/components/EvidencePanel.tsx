@@ -29,19 +29,19 @@ interface Props {
   ipfs?: IpfsData | null
 }
 
-const verdictConfig: Record<string, { label: string; color: string }> = {
-  VALID_BUG: { label: "Valid Bug", color: "text-emerald-400" },
-  INVALID: { label: "Invalid", color: "text-red-400" },
-  TEST_ARTIFACT: { label: "Test Artifact", color: "text-amber-400" },
-  BUILD_FAILURE: { label: "Build Failure", color: "text-red-400" },
+const verdictConfig: Record<string, { label: string; color: string; badge: string }> = {
+  VALID_BUG: { label: "Valid Bug", color: "text-emerald-400", badge: "bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/20" },
+  INVALID: { label: "Invalid", color: "text-red-400", badge: "bg-red-400/10 text-red-400 ring-1 ring-red-400/20" },
+  TEST_ARTIFACT: { label: "Test Artifact", color: "text-amber-400", badge: "bg-amber-400/10 text-amber-400 ring-1 ring-amber-400/20" },
+  BUILD_FAILURE: { label: "Build Failure", color: "text-red-400", badge: "bg-red-400/10 text-red-400 ring-1 ring-red-400/20" },
 }
 
-const escrowStatusColor: Record<string, string> = {
-  Created: "text-zinc-400",
-  Funded: "text-amber-400",
-  Released: "text-emerald-400",
-  Refunded: "text-red-400",
-  Expired: "text-zinc-600",
+const escrowStatusConfig: Record<string, { color: string; badge: string }> = {
+  Created: { color: "text-zinc-400", badge: "bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700" },
+  Funded: { color: "text-amber-400", badge: "bg-amber-400/10 text-amber-400 ring-1 ring-amber-400/20" },
+  Released: { color: "text-emerald-400", badge: "bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/20" },
+  Refunded: { color: "text-red-400", badge: "bg-red-400/10 text-red-400 ring-1 ring-red-400/20" },
+  Expired: { color: "text-zinc-600", badge: "bg-zinc-800 text-zinc-600 ring-1 ring-zinc-700" },
 }
 
 /** Copyable monospace value with click-to-copy and visual feedback. */
@@ -80,26 +80,34 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
   if (!hasContent) return null
 
   return (
-    <div className="mt-4 space-y-3">
+    <div className="space-y-4">
       {/* Forge Verification */}
       {verification && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">
-            Forge Verification
-          </h3>
+        <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl shadow-lg shadow-black/20 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400/60" />
+              Forge Verification
+            </h3>
+            {verification.status !== "running" && verification.verdict && (
+              <span className={`text-[10px] font-mono font-medium px-2.5 py-1 rounded-full ${verdictConfig[verification.verdict]?.badge ?? "bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700"}`}>
+                {verdictConfig[verification.verdict]?.label ?? verification.verdict}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3 mb-2">
             {verification.status === "running" ? (
               <span className="flex items-center gap-2 text-sm text-amber-400">
-                <span className="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+                <span className="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse glow-amber" />
                 Running forge tests...
               </span>
             ) : (
               <>
                 <span className={`text-sm font-mono font-medium ${verdictConfig[verification.verdict ?? ""]?.color ?? "text-zinc-400"}`}>
-                  {verdictConfig[verification.verdict ?? ""]?.label ?? verification.verdict ?? verification.status}
+                  {verification.status === "passed" ? "Tests passed" : verification.status === "failed" ? "Tests failed" : verification.status}
                 </span>
                 {verification.executionTimeMs != null && (
-                  <span className="text-xs text-zinc-600">
+                  <span className="text-xs text-zinc-600 font-mono">
                     {(verification.executionTimeMs / 1000).toFixed(1)}s
                   </span>
                 )}
@@ -107,7 +115,7 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
             )}
           </div>
           {evidence && (
-            <pre className="text-xs text-zinc-400 font-mono whitespace-pre-wrap leading-relaxed mt-2 max-h-48 overflow-y-auto">
+            <pre className="text-xs text-zinc-400 font-mono whitespace-pre-wrap leading-relaxed mt-3 max-h-48 overflow-y-auto bg-zinc-950/50 rounded-lg p-3 ring-1 ring-zinc-800">
               {evidence}
             </pre>
           )}
@@ -116,24 +124,24 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
 
       {/* Escrow Status */}
       {escrow && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">
-            Escrow
-          </h3>
-          <div className="space-y-1.5">
+        <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl shadow-lg shadow-black/20 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400/60" />
+              Escrow
+            </h3>
+            <span className={`text-[10px] font-mono font-medium px-2.5 py-1 rounded-full ${escrowStatusConfig[escrow.status]?.badge ?? "bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700"}`}>
+              {escrow.status}
+            </span>
+          </div>
+          <div className="space-y-2.5">
             <div className="flex items-start gap-2">
-              <span className="text-xs text-zinc-500 flex-shrink-0">ID:</span>
+              <span className="text-xs text-zinc-500 flex-shrink-0 w-8">ID:</span>
               <CopyableValue value={escrow.escrowId} className="text-xs text-zinc-300" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500">Status:</span>
-              <span className={`text-xs font-mono font-medium ${escrowStatusColor[escrow.status] ?? "text-zinc-400"}`}>
-                {escrow.status}
-              </span>
             </div>
             {escrow.txHash && (
               <div className="flex items-start gap-2">
-                <span className="text-xs text-zinc-500 flex-shrink-0">tx:</span>
+                <span className="text-xs text-zinc-500 flex-shrink-0 w-8">tx:</span>
                 <CopyableValue value={escrow.txHash} className="text-xs text-zinc-400" />
               </div>
             )}
@@ -143,12 +151,18 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
 
       {/* IPFS Archival */}
       {ipfs && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">
-            Evidence Archive
-          </h3>
+        <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl shadow-lg shadow-black/20 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
+              Evidence Archive
+            </h3>
+            <span className="text-[10px] font-mono font-medium px-2.5 py-1 rounded-full bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/20">
+              Pinned
+            </span>
+          </div>
           <div className="flex items-start gap-2">
-            <span className="text-xs text-zinc-500 flex-shrink-0">CID:</span>
+            <span className="text-xs text-zinc-500 flex-shrink-0 w-8">CID:</span>
             <CopyableValue value={ipfs.cid} className="text-xs text-emerald-400" />
           </div>
         </div>

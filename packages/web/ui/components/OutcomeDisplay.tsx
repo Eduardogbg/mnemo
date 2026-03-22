@@ -5,10 +5,10 @@ interface Props {
   outcome: Outcome
 }
 
-const outcomeConfig: Record<string, { label: string; color: string; bg: string }> = {
-  ACCEPTED: { label: "Accepted", color: "text-emerald-400", bg: "bg-emerald-400/10 border-emerald-400/20" },
-  REJECTED: { label: "Rejected", color: "text-red-400", bg: "bg-red-400/10 border-red-400/20" },
-  EXHAUSTED: { label: "Exhausted", color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
+const outcomeConfig: Record<string, { label: string; color: string; bg: string; glow: string }> = {
+  ACCEPTED: { label: "Accepted", color: "text-emerald-400", bg: "bg-emerald-400/10 ring-1 ring-emerald-400/20", glow: "glow-green" },
+  REJECTED: { label: "Rejected", color: "text-red-400", bg: "bg-red-400/10 ring-1 ring-red-400/20", glow: "glow-red" },
+  EXHAUSTED: { label: "Exhausted", color: "text-amber-400", bg: "bg-amber-400/10 ring-1 ring-amber-400/20", glow: "glow-amber" },
 }
 
 const severityConfig: Record<string, { color: string }> = {
@@ -23,7 +23,7 @@ export function OutcomeDisplay({ outcome }: Props) {
 
   return (
     <div>
-      <div className={`mt-6 rounded-lg border p-5 ${config.bg}`}>
+      <div className={`mt-6 rounded-xl shadow-lg shadow-black/20 p-5 ${config.bg}`}>
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3">
