@@ -2,6 +2,8 @@
  * EvidencePanel — displays forge verification output, escrow status, and IPFS archival.
  */
 
+import { useState, useCallback } from "react"
+
 interface VerificationData {
   status: "running" | "passed" | "failed" | "error"
   verdict?: string
@@ -42,6 +44,37 @@ const escrowStatusColor: Record<string, string> = {
   Expired: "text-zinc-600",
 }
 
+/** Copyable monospace value with click-to-copy and visual feedback. */
+function CopyableValue({ value, className = "" }: { value: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [value])
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={`Click to copy: ${value}`}
+      className={`font-mono text-left cursor-pointer hover:text-zinc-200 transition-colors relative group ${className}`}
+    >
+      <span className="break-all">{value}</span>
+      <span
+        className={`
+          absolute -top-5 left-0 text-[9px] px-1.5 py-0.5 rounded bg-zinc-700 text-emerald-400
+          pointer-events-none transition-opacity duration-200
+          ${copied ? "opacity-100" : "opacity-0"}
+        `}
+      >
+        Copied
+      </span>
+    </button>
+  )
+}
+
 export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
   const hasContent = evidence || verification || escrow || ipfs
   if (!hasContent) return null
@@ -58,7 +91,7 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
             {verification.status === "running" ? (
               <span className="flex items-center gap-2 text-sm text-amber-400">
                 <span className="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
-                Running forge tests…
+                Running forge tests...
               </span>
             ) : (
               <>
@@ -87,10 +120,10 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
           <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">
             Escrow
           </h3>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500">ID:</span>
-              <span className="text-xs font-mono text-zinc-300">{escrow.escrowId}</span>
+          <div className="space-y-1.5">
+            <div className="flex items-start gap-2">
+              <span className="text-xs text-zinc-500 flex-shrink-0">ID:</span>
+              <CopyableValue value={escrow.escrowId} className="text-xs text-zinc-300" />
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500">Status:</span>
@@ -98,14 +131,13 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
                 {escrow.status}
               </span>
             </div>
+            {escrow.txHash && (
+              <div className="flex items-start gap-2">
+                <span className="text-xs text-zinc-500 flex-shrink-0">tx:</span>
+                <CopyableValue value={escrow.txHash} className="text-xs text-zinc-400" />
+              </div>
+            )}
           </div>
-          {escrow.txHash && (
-            <div className="mt-1">
-              <span className="text-xs text-zinc-600 font-mono">
-                tx: {escrow.txHash.slice(0, 18)}…
-              </span>
-            </div>
-          )}
         </div>
       )}
 
@@ -115,11 +147,9 @@ export function EvidencePanel({ evidence, verification, escrow, ipfs }: Props) {
           <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">
             Evidence Archive
           </h3>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">CID:</span>
-            <span className="text-xs font-mono text-emerald-400">
-              {ipfs.cid.slice(0, 24)}…
-            </span>
+          <div className="flex items-start gap-2">
+            <span className="text-xs text-zinc-500 flex-shrink-0">CID:</span>
+            <CopyableValue value={ipfs.cid} className="text-xs text-emerald-400" />
           </div>
         </div>
       )}

@@ -3,6 +3,8 @@
  * Sits in the left column (~300px) and tells the story of the negotiation.
  */
 
+import { useState, useCallback } from "react"
+
 export interface PipelineStep {
   step: number
   name: string
@@ -14,9 +16,46 @@ interface Props {
   steps: PipelineStep[]
 }
 
-function truncateHash(hash: string, len = 10): string {
-  if (hash.length <= len + 4) return hash
-  return `${hash.slice(0, len)}...${hash.slice(-4)}`
+/** Returns true if the value looks like a hex hash or address. */
+function isHashOrAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{8,}$/.test(value)
+}
+
+/** Truncate hash to first 10 + last 8 characters for display. */
+function truncateHash(hash: string): string {
+  if (hash.length <= 22) return hash
+  return `${hash.slice(0, 10)}...${hash.slice(-8)}`
+}
+
+/** Copyable monospace value — click to copy, shows brief "Copied" feedback. */
+function CopyableHash({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [value])
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={`Click to copy: ${value}`}
+      className="text-[10px] text-zinc-400 font-mono break-all text-left cursor-pointer hover:text-zinc-200 transition-colors relative group"
+    >
+      {truncateHash(value)}
+      <span
+        className={`
+          absolute -top-5 left-0 text-[9px] px-1.5 py-0.5 rounded bg-zinc-700 text-emerald-400
+          pointer-events-none transition-opacity duration-200
+          ${copied ? "opacity-100" : "opacity-0"}
+        `}
+      >
+        Copied
+      </span>
+    </button>
+  )
 }
 
 function StatusIcon({ status }: { status: PipelineStep["status"] }) {
@@ -95,13 +134,17 @@ function StepRow({ step }: { step: PipelineStep }) {
 
         {/* Detail key-value pairs */}
         {step.detail && Object.keys(step.detail).length > 0 && (
-          <div className="mt-1 space-y-0.5">
+          <div className="mt-1.5 space-y-1">
             {Object.entries(step.detail).map(([key, value]) => (
-              <div key={key} className="flex items-center gap-1.5">
+              <div key={key} className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-zinc-600 font-mono">{key}:</span>
-                <span className="text-[10px] text-zinc-400 font-mono truncate">
-                  {value.startsWith("0x") ? truncateHash(value) : value}
-                </span>
+                {isHashOrAddress(value) ? (
+                  <CopyableHash value={value} />
+                ) : (
+                  <span className="text-[10px] text-zinc-400 font-mono break-all">
+                    {value}
+                  </span>
+                )}
               </div>
             ))}
           </div>
