@@ -4,27 +4,22 @@
 
 // Errors
 export {
-  ProviderError,
   AgentError,
   StateError,
 } from "./Errors.js"
 
-// Tools (shared types only)
+// Tools (validation helpers)
 export {
-  type ToolDefinition,
-  type ToolCall,
-  type GenerateTextResult,
   isValidSeverity,
 } from "./tools.js"
 
-// Provider
+// Provider (LanguageModel wrappers)
 export {
-  Provider,
-  OpenRouterLayer,
-  layerFromConfig,
-  mockLayer,
-  type ProviderConfig,
-  type ProviderService,
+  model,
+  VeniceModel,
+  OpenRouterModel,
+  mockModel,
+  type ChatCompletionsConfig,
 } from "./Provider.js"
 
 // State

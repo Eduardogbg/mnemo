@@ -3,11 +3,6 @@
  */
 import { Data } from "effect"
 
-export class ProviderError extends Data.TaggedError("ProviderError")<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
-
 export class AgentError extends Data.TaggedError("AgentError")<{
   readonly message: string
   readonly agentId: string
