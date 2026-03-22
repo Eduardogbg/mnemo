@@ -34,7 +34,7 @@ export const RoomsApiLive = HttpApiBuilder.group(MnemoApi, "rooms", (handlers) =
             turnNumber: t.turnNumber,
             agentId: t.agentId,
             message: t.message,
-            toolCalls: t.toolCalls.map((tc) => ({ name: tc.name, args: tc.args })),
+            toolCalls: t.toolCalls.map((tc) => ({ name: tc.name, args: tc.params })),
           })),
           outcome: s.result ? Option.some(s.result.outcome) : Option.none(),
           assignedSeverity: s.result?.assignedSeverity ? Option.some(s.result.assignedSeverity) : Option.none(),

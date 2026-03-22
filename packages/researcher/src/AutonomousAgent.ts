@@ -5,16 +5,21 @@
  * (max iterations, max LLM calls) and logs all activity via ExecutionLog.
  */
 import { Effect } from "effect"
-import { makeAgent, type AgentConfig, type AgentRunResult, AgentError, Provider, State, type ToolCall } from "@mnemo/core"
-import { proverTools } from "@mnemo/harness"
+import * as LanguageModel from "@effect/ai/LanguageModel"
+import * as Toolkit from "@effect/ai/Toolkit"
+import { makeAgent, type AgentConfig, type AgentRunResult, AgentError, State } from "@mnemo/core"
+import { proverToolkit, proverHandlersLayer } from "@mnemo/harness"
 import { ExecutionLog } from "./ExecutionLog.js"
-import { researcherTools } from "./tools.js"
+import { researcherToolkit, researcherHandlersLayer } from "./tools.js"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type AgentPhase = "discover" | "plan" | "execute" | "verify" | "submit"
+
+/** Tool call shape from the new Agent API */
+type ToolCall = { readonly name: string; readonly params: Record<string, unknown> }
 
 export interface AutonomousConfig {
   /** Agent ID. */
@@ -80,16 +85,19 @@ export const runAutonomous = (
 ): Effect.Effect<
   AutonomousResult,
   AgentError,
-  Provider | State | ExecutionLog
+  LanguageModel.LanguageModel | State | ExecutionLog
 > =>
   Effect.gen(function* () {
     const log = yield* ExecutionLog
+
+    // Merge researcher + prover toolkits
+    const combinedToolkit = Toolkit.merge(researcherToolkit, proverToolkit)
 
     const agentConfig: AgentConfig = {
       id: config.id,
       role: "researcher",
       systemPrompt: config.systemPromptOverride ?? RESEARCHER_SYSTEM_PROMPT,
-      tools: [...researcherTools, ...proverTools],
+      toolkit: combinedToolkit,
     }
 
     const agent = makeAgent(agentConfig)
@@ -116,7 +124,6 @@ export const runAutonomous = (
       const phaseToolCalls: ToolCall[] = []
       let phaseTurns = 0
 
-      // Each phase runs the agent in a loop until it signals done or hits budget
       let phaseMessage = `You are now in the ${phase.toUpperCase()} phase. ` +
         getPhaseInstruction(phase)
 
@@ -127,31 +134,31 @@ export const runAutonomous = (
         }
 
         const startMs = Date.now()
-        const result: AgentRunResult = yield* agent.run(phaseMessage)
+        const result: AgentRunResult = yield* (agent.run(phaseMessage) as Effect.Effect<AgentRunResult, AgentError, any>).pipe(
+          Effect.provide(researcherHandlersLayer),
+          Effect.provide(proverHandlersLayer),
+        )
         const latencyMs = Date.now() - startMs
         totalIterations++
         phaseTurns++
 
-        // Log the LLM call
         yield* log.logLlmCall(phase, {
-          model: "openrouter",
+          model: "venice",
           latencyMs,
           messageCount: 1,
           toolCount: result.toolCalls.length,
         })
 
-        // Process tool calls
         for (const tc of result.toolCalls) {
           phaseToolCalls.push(tc)
 
           yield* log.logToolCall(phase, {
             name: tc.name,
-            args: tc.args,
+            args: tc.params,
             durationMs: 0,
             success: true,
           })
 
-          // Execute tool handler if provided
           if (config.onToolCall) {
             const toolResult = yield* config.onToolCall(tc).pipe(
               Effect.catchAll((e) =>
@@ -161,23 +168,20 @@ export const runAutonomous = (
                 }),
               ),
             )
-            // Feed tool result back as next message
             phaseMessage = `Tool ${tc.name} returned: ${toolResult}`
           } else {
-            phaseMessage = `Tool ${tc.name} was called with args: ${JSON.stringify(tc.args)}. Continue with the ${phase} phase.`
+            phaseMessage = `Tool ${tc.name} was called with args: ${JSON.stringify(tc.params)}. Continue with the ${phase} phase.`
           }
 
-          // Log findings from report_finding
           if (tc.name === "report_finding") {
             yield* log.logFinding(phase, {
-              severity: String(tc.args.severity ?? "unknown"),
-              description: String(tc.args.description ?? ""),
-              challengeId: tc.args.challengeId as string | undefined,
+              severity: String(tc.params.severity ?? "unknown"),
+              description: String(tc.params.description ?? ""),
+              challengeId: tc.params.challengeId as string | undefined,
             })
           }
         }
 
-        // Log decision
         yield* log.logDecision(phase, {
           action: result.toolCalls.length > 0
             ? `Called ${result.toolCalls.map((tc) => tc.name).join(", ")}`
@@ -185,7 +189,6 @@ export const runAutonomous = (
           reason: result.response.slice(0, 200),
         })
 
-        // Check if agent signals done with this phase
         if (
           result.response.includes("[DONE]") ||
           result.toolCalls.length === 0
@@ -193,7 +196,6 @@ export const runAutonomous = (
           break
         }
 
-        // If no tool calls, continue with next iteration
         if (result.toolCalls.length === 0) {
           phaseMessage = `Continue with the ${phase} phase. Use your tools to make progress.`
         }

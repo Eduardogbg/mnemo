@@ -17,12 +17,12 @@
  * Usage:
  *   bun run packages/researcher/src/experiments/e2e-discovery.ts
  */
-import { Effect, Redacted } from "effect"
+import { Effect } from "effect"
+import * as LanguageModel from "@effect/ai/LanguageModel"
 import {
-  Provider,
-  layerFromConfig,
-  type ProviderConfig,
+  model,
   InMemoryLayer,
+  type ChatCompletionsConfig,
 } from "@mnemo/core"
 import {
   Registry,
@@ -39,8 +39,8 @@ import { getChallenge, verifyForgeOnly, VERIFIER_SYSTEM_PROMPT, type HybridChall
 import { FoundryLive } from "@mnemo/dvdefi"
 import {
   makeRoom,
-  proverTools,
-  verifierTools,
+  verifierToolkit,
+  proverToolkit,
   type AgentConfig,
   type NegotiationResult,
 } from "@mnemo/harness"
@@ -60,17 +60,14 @@ async function preflight(): Promise<void> {
   const errors: string[] = []
   const warnings: string[] = []
 
-  // 1. API key
   if (!process.env.VENICE_API_KEY && !process.env.OPENROUTER_API_KEY) {
     errors.push("No LLM API key. Set VENICE_API_KEY or OPENROUTER_API_KEY in .env")
   }
 
-  // 2. DVDeFi repo (needed for forge verification)
   if (!existsSync(resolve(DVDEFI_ROOT, "foundry.toml"))) {
     errors.push(`DVDeFi repo not found at ${DVDEFI_ROOT}\n  Clone it: git clone https://github.com/tinchoabbate/damn-vulnerable-defi repos/damn-vulnerable-defi`)
   }
 
-  // 3. Forge available
   try {
     const proc = Bun.spawn(["forge", "--version"], { stdout: "pipe", stderr: "pipe" })
     await proc.exited
@@ -79,7 +76,6 @@ async function preflight(): Promise<void> {
     errors.push("forge not found. Install Foundry: https://book.getfoundry.sh/getting-started/installation")
   }
 
-  // 4. IPFS (Kubo)
   try {
     const res = await fetch(`${IPFS_API}/api/v0/id`, {
       method: "POST",
@@ -90,7 +86,6 @@ async function preflight(): Promise<void> {
     warnings.push(`IPFS not reachable at ${IPFS_API}\n  Start it: docker compose -f infra/dstack/docker-compose.yml --env-file .env up -d ipfs\n  IPFS archival (step 10) will fail without it.`)
   }
 
-  // 5. TEE simulator (optional — only needed for attestation demo)
   try {
     const res = await fetch("http://localhost:8090/prpc/Tappd.TdxQuote", {
       method: "POST",
@@ -103,7 +98,6 @@ async function preflight(): Promise<void> {
     warnings.push("TEE simulator not reachable at :8090 — attestation (step 3) will use simulated values.\n  Start it: docker compose -f infra/dstack/docker-compose.yml up -d dstack-simulator")
   }
 
-  // Print results
   if (warnings.length > 0) {
     console.log("=== PREFLIGHT WARNINGS ===")
     for (const w of warnings) console.log(`  WARN: ${w}`)
@@ -127,8 +121,8 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 const apiKey = VENICE_API_KEY || OPENROUTER_API_KEY
 
 const useVenice = !!VENICE_API_KEY
-const providerConfig: ProviderConfig = {
-  apiKey: Redacted.make(apiKey),
+const providerConfig: ChatCompletionsConfig = {
+  apiKey,
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
   model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
   temperature: 0.3,
@@ -234,7 +228,6 @@ const pollRegistry = (
 
       if (!result.found || !result.protocol) break
 
-      // A zeroed-out owner means the slot is empty (relevant for on-chain layer)
       if (result.protocol.owner === "0x" + "0".repeat(40)) break
 
       if (result.protocol.active) {
@@ -271,7 +264,6 @@ const uploadToIpfs = async (payload: Record<string, unknown>): Promise<{ cid: st
 const program = Effect.gen(function* () {
   const registry = yield* Registry
   const escrow = yield* Escrow
-  const provider = yield* Provider
   const erc8004 = yield* Erc8004
   const log = yield* ExecutionLog
 
@@ -403,10 +395,12 @@ const program = Effect.gen(function* () {
 
   const startMs = Date.now()
 
-  const result = yield* provider.generateText({
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user" as const, content: USER_PROMPT }],
-  })
+  const result = yield* LanguageModel.generateText({
+    prompt: [
+      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "user" as const, content: USER_PROMPT },
+    ],
+  }).pipe(Effect.scoped)
 
   const latencyMs = Date.now() - startMs
 
@@ -508,7 +502,7 @@ YOUR TASK:
 Present the forge-verified vulnerability to the verifier. You have PROOF: the exploit test passes (vulnerability exists) and the patched test passes (fix works).
 When the verifier assigns a severity, use the accept_severity tool to accept it, or reject_severity if you disagree.
 Be concise — 3-5 sentences per turn. Stay technical. Lead with the forge proof.`,
-    tools: proverTools,
+    toolkit: proverToolkit,
   }
 
   // Build verifier config
@@ -536,7 +530,7 @@ ${evidenceContext}
 The exploit has been verified by forge: exploit test PASSED (vulnerability exists) and patched test PASSED (fix works). This is cryptographic proof from the TEE.
 
 IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue your verdict. Do not just write text — call the tool.`,
-    tools: verifierTools,
+    toolkit: verifierToolkit,
   }
 
   const room = makeRoom(proverConfig, verifierConfig, {
@@ -546,7 +540,7 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
       console.log(`  [Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message.slice(0, 150)}...`)
       if (turn.toolCalls.length > 0) {
         for (const tc of turn.toolCalls) {
-          console.log(`    -> tool: ${tc.name}(${JSON.stringify(tc.args)})`)
+          console.log(`    -> tool: ${tc.name}(${JSON.stringify(tc.params)})`)
         }
       }
     },
@@ -555,7 +549,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
   const negotiation: NegotiationResult = yield* room
     .negotiate()
     .pipe(
-      Effect.provide(layerFromConfig(providerConfig)),
       Effect.provide(InMemoryLayer),
     )
 
@@ -616,7 +609,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
     console.log("[10/10] Post-settlement (reputation + IPFS archive + log flush)...")
     yield* log.logPhase("post-settlement", "start")
 
-    // Reputation feedback
     const researcherFeedbackTx = yield* erc8004.giveFeedback({
       agentId: researcherAgentId,
       value: 100n,
@@ -635,7 +627,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
     })
     console.log(`  Protocol reputation: +100 (tx=${protocolFeedbackTx})`)
 
-    // IPFS archival
     const ipfsPayload = {
       protocolId: protocolData.protocolId.toString(),
       challengeId: "side-entrance",
@@ -654,14 +645,12 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
     console.log(`  IPFS archive: CID=${ipfsResult.cid}`)
     console.log(`  Gateway: ${ipfsResult.url}`)
 
-    // Flush execution log
     yield* log.flush("agent_log.json")
     console.log("  ExecutionLog flushed to agent_log.json")
 
     yield* log.logPhase("post-settlement", "end")
     console.log()
 
-    // ── Summary ─────────────────────────────────────────────────────
     console.log("=== SUMMARY ===")
     console.log(`Identity:     Protocol=${protocolAgentId}, Researcher=${researcherAgentId}`)
     console.log(`Attestation:  RTMR[3]=${attestation.rtmr3.slice(0, 16)}...`)
@@ -679,7 +668,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
     console.log(`  No payment.`)
     console.log()
 
-    // Still do post-settlement logging
     console.log("[10/10] Post-settlement (reputation + log flush)...")
     yield* log.logPhase("post-settlement", "start")
 
@@ -726,7 +714,7 @@ async function main() {
   await preflight()
 
   const layers = program.pipe(
-    Effect.provide(layerFromConfig(providerConfig)),
+    Effect.provide(model(providerConfig)),
     Effect.provide(RegistryMockLayer()),
     Effect.provide(EscrowMockLayer()),
     Effect.provide(Erc8004MockLayer()),

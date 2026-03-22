@@ -18,5 +18,9 @@ export {
 } from "./AutonomousAgent.js"
 
 export {
-  researcherTools,
+  researcherToolkit,
+  AnalyzeChallenge,
+  RequestRoom,
+  ReportFinding,
+  researcherHandlersLayer,
 } from "./tools.js"

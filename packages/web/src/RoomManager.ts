@@ -10,13 +10,15 @@
  *   - @mnemo/harness (negotiation turn loop)
  */
 import * as path from "node:path"
-import { Context, Effect, Layer, PubSub, Fiber, Option, Redacted } from "effect"
+import { Context, Effect, Layer, PubSub, Fiber, Option } from "effect"
 import {
   makeRoom,
   type Turn,
   type NegotiationResult,
   InMemoryLayer,
-  layerFromConfig,
+  model,
+  verifierToolkit,
+  proverToolkit,
 } from "@mnemo/harness"
 import {
   getChallenge,
@@ -32,7 +34,7 @@ import {
   EscrowMockLayer,
   type EscrowStatus,
 } from "@mnemo/chain"
-import { proverTools, verifierTools, type AgentConfig } from "@mnemo/harness"
+import { type AgentConfig } from "@mnemo/harness"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,7 +126,7 @@ YOUR TASK:
 Present the vulnerability to the verifier. Explain the mechanism precisely and concisely.
 When the verifier assigns a severity, use the accept_severity tool to accept it, or reject_severity if you disagree.
 Be concise — 3-5 sentences per turn. Stay technical.`,
-  tools: proverTools,
+  toolkit: proverToolkit,
 })
 
 const makeVerifierConfig = (evidence: string): AgentConfig => ({
@@ -137,7 +139,7 @@ You have already run the verification pipeline. Here are the results:
 ${evidence}
 
 IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue your verdict. Do not just write text — call the tool.`,
-  tools: verifierTools,
+  toolkit: verifierToolkit,
 })
 
 const formatEvidence = (result: HybridResult): string => {
@@ -190,14 +192,12 @@ const uploadToIpfs = async (evidence: Record<string, unknown>): Promise<IpfsEven
 
 /**
  * Run forge verification for a challenge.
- * Returns the HybridResult or null if forge is unavailable.
  */
 const runVerification = (
   challenge: HybridChallenge,
   pubsub: PubSub.PubSub<RoomEvent>,
 ): Effect.Effect<HybridResult | null, never, never> =>
   Effect.gen(function* () {
-    // Notify: verification starting
     yield* PubSub.publish(pubsub, {
       type: "verification",
       data: { status: "running" },
@@ -230,7 +230,7 @@ const runVerification = (
   )
 
 /**
- * Run escrow lifecycle: create → fund → release/refund.
+ * Run escrow lifecycle: create -> fund -> release/refund.
  */
 const runEscrow = (
   roomId: string,
@@ -240,11 +240,10 @@ const runEscrow = (
   Effect.gen(function* () {
     const escrow = yield* Escrow
 
-    // Create escrow
     const { escrowId, txHash: createTx } = yield* escrow.create({
       funder: "0x" + "F".repeat(40),
       payee: "0x" + "A".repeat(40),
-      amount: 1000000000000000000n, // 1 ETH
+      amount: 1000000000000000000n,
       deadline: BigInt(Math.floor(Date.now() / 1000) + 86400),
       commitHash: "0x" + roomId.replace(/[^a-f0-9]/gi, "").padEnd(64, "0").slice(0, 64),
     })
@@ -255,14 +254,12 @@ const runEscrow = (
       data: { escrowId: escrowIdStr, status: "Created", txHash: createTx },
     })
 
-    // Fund
     const fundTx = yield* escrow.fund(escrowId, 1000000000000000000n)
     yield* PubSub.publish(pubsub, {
       type: "escrow",
       data: { escrowId: escrowIdStr, status: "Funded", txHash: fundTx },
     })
 
-    // Release or refund based on negotiation outcome
     if (accepted) {
       const releaseTx = yield* escrow.release(escrowId)
       const event: EscrowEvent = { escrowId: escrowIdStr, status: "Released", txHash: releaseTx }
@@ -298,7 +295,7 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
         const entry: RoomEntry = {
           challengeId,
           pubsub,
-          fiber: undefined as any, // set below
+          fiber: undefined as any,
           result: null,
           turns: [],
           evidence: null,
@@ -308,12 +305,11 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
         }
         rooms.set(roomId, entry)
 
-        // Fork the full pipeline as a background fiber
         const fiber = yield* Effect.gen(function* () {
           // Step 1: Run forge verification
           const forgeResult = yield* runVerification(challenge, pubsub)
 
-          // Build evidence string — real forge output or graceful fallback
+          // Build evidence string
           let evidence: string
           if (forgeResult) {
             evidence = formatEvidence(forgeResult)
@@ -325,7 +321,6 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
               executionTimeMs: forgeResult.executionTimeMs,
             }
           } else {
-            // Fallback: forge unavailable, use challenge description
             evidence = [
               `=== VERIFICATION EVIDENCE ===`,
               `Challenge: ${challenge.name}`,
@@ -354,8 +349,8 @@ export const RoomManagerLive: Layer.Layer<RoomManager> = Layer.succeed(
             return yield* Effect.fail(new Error("OPENROUTER_API_KEY not set"))
           }
 
-          const providerLayer = layerFromConfig({
-            apiKey: Redacted.make(apiKey),
+          const providerLayer = model({
+            apiKey,
             baseURL: "https://openrouter.ai/api/v1",
             model: "deepseek/deepseek-chat",
             temperature: 0.7,

@@ -4,20 +4,20 @@
  * Solidity contract WITHOUT being told it is buggy?
  *
  * We feed the SideEntranceLenderPool source (from DVDeFi) to deepseek-chat
- * via OpenRouter and ask it to audit the contract. We do NOT mention DVDeFi,
+ * via Venice and ask it to audit the contract. We do NOT mention DVDeFi,
  * challenge names, or hint that the contract is known-vulnerable.
  *
  * Usage:
  *   bun run packages/researcher/src/experiments/vuln-discovery.ts
  */
-import { Effect, Redacted } from "effect"
-import { Provider, layerFromConfig, type ProviderConfig } from "@mnemo/core"
+import { Effect } from "effect"
+import * as LanguageModel from "@effect/ai/LanguageModel"
+import { model, type ChatCompletionsConfig } from "@mnemo/core"
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-// Venice is primary, OpenRouter is fallback
 const VENICE_API_KEY = process.env.VENICE_API_KEY ?? ""
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ""
 
@@ -28,8 +28,8 @@ if (!apiKey) {
 }
 
 const useVenice = !!VENICE_API_KEY
-const providerConfig: ProviderConfig = {
-  apiKey: Redacted.make(apiKey),
+const providerConfig: ChatCompletionsConfig = {
+  apiKey,
   baseURL: useVenice ? "https://api.venice.ai/api/v1" : "https://openrouter.ai/api/v1",
   model: useVenice ? "llama-3.3-70b" : "deepseek/deepseek-chat",
   temperature: 0.3,
@@ -110,8 +110,6 @@ Provide a detailed security audit report.`
 // ---------------------------------------------------------------------------
 
 const experiment = Effect.gen(function* () {
-  const provider = yield* Provider
-
   console.log("=".repeat(70))
   console.log("EXPERIMENT: Autonomous Vulnerability Discovery")
   console.log("=".repeat(70))
@@ -125,10 +123,12 @@ const experiment = Effect.gen(function* () {
 
   const startMs = Date.now()
 
-  const result = yield* provider.generateText({
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user" as const, content: USER_PROMPT }],
-  })
+  const result = yield* LanguageModel.generateText({
+    prompt: [
+      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "user" as const, content: USER_PROMPT },
+    ],
+  }).pipe(Effect.scoped)
 
   const latencyMs = Date.now() - startMs
 
@@ -190,7 +190,7 @@ const experiment = Effect.gen(function* () {
 // ---------------------------------------------------------------------------
 
 const program = experiment.pipe(
-  Effect.provide(layerFromConfig(providerConfig)),
+  Effect.provide(model(providerConfig)),
 )
 
 Effect.runPromise(program).catch((err) => {
