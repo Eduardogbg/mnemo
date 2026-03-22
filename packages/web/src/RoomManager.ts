@@ -263,6 +263,8 @@ const AUDIT_SYSTEM_PROMPT = `You are a smart contract security auditor. You perf
 - The severity (Critical / High / Medium / Low / Informational)
 - Recommended fix
 
+Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security auditor — not as an AI assistant.
+
 Do not speculate. Only report findings you are confident about based on the code.`
 
 const AUDIT_USER_PROMPT = `Audit the following Solidity contract for security vulnerabilities:
@@ -613,6 +615,8 @@ export const RoomManagerLive: Layer.Layer<RoomManager, never, Erc8004 | Registry
               id: "prover",
               role: "researcher",
               systemPrompt: `You are a security researcher who discovered and VERIFIED a vulnerability in a DeFi protocol.
+
+IMPORTANT: Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security researcher — not as an AI assistant.
 
 CHALLENGE: ${challenge.name}
 DESCRIPTION: ${challenge.description}

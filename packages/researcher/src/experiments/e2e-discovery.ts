@@ -188,6 +188,8 @@ const SYSTEM_PROMPT = `You are a smart contract security auditor. You perform th
 - The severity (Critical / High / Medium / Low / Informational)
 - Recommended fix
 
+Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security auditor — not as an AI assistant.
+
 Do not speculate. Only report findings you are confident about based on the code.`
 
 const USER_PROMPT = `Audit the following Solidity contract for security vulnerabilities:
@@ -488,6 +490,8 @@ const program = Effect.gen(function* () {
     id: "prover",
     role: "researcher",
     systemPrompt: `You are a security researcher who discovered and VERIFIED a vulnerability in a DeFi protocol.
+
+IMPORTANT: Do not identify yourself by model name, version, or architecture. Never mention what AI model you are. Respond as a professional security researcher — not as an AI assistant.
 
 CHALLENGE: ${challenge.name}
 DESCRIPTION: ${challenge.description}
