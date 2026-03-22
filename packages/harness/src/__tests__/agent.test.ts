@@ -1,21 +1,19 @@
 /**
  * Agent tests — verifies agent abstraction with mock and real providers.
  *
- * Requires OPENROUTER_API_KEY for integration tests. Skips gracefully if missing.
+ * Requires VENICE_API_KEY for integration tests. Skips gracefully if missing.
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
 import {
   makeAgent,
-  Provider,
   State,
   InMemoryLayer,
-  mockLayer,
-  OpenRouterLayer,
-  type GenerateTextResult,
+  mockModel,
+  VeniceModel,
 } from "../index.js"
 
-const hasApiKey = !!process.env.OPENROUTER_API_KEY
+const hasApiKey = !!process.env.VENICE_API_KEY
 
 const testAgent = makeAgent({
   id: "agent-test",
@@ -24,7 +22,7 @@ const testAgent = makeAgent({
 })
 
 describe("Agent", () => {
-  test("agent.run with mock provider stores messages in state", async () => {
+  test("agent.run with mock model stores messages in state", async () => {
     const program = Effect.gen(function* () {
       const result = yield* testAgent.run("What is the capital of France?")
       const state = yield* State
@@ -34,7 +32,7 @@ describe("Agent", () => {
 
     const { result, messages } = await Effect.runPromise(
       program.pipe(
-        Effect.provide(mockLayer((): GenerateTextResult => ({ text: "Paris is the capital of France.", toolCalls: [] }))),
+        Effect.provide(mockModel(() => ({ text: "Paris is the capital of France." }))),
         Effect.provide(InMemoryLayer)
       )
     )
@@ -68,23 +66,23 @@ describe("Agent", () => {
     await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((msgs): GenerateTextResult => {
+          mockModel((msgs: ReadonlyArray<{ role: string; content: string }>) => {
             sentMessages = msgs as Array<{ role: string; content: string }>
-            return { text: "follow-up answer", toolCalls: [] }
+            return { text: "follow-up answer" }
           })
         )
       )
     )
 
-    // History message + current message
-    expect(sentMessages).toHaveLength(2)
-    expect(sentMessages[0]!.content).toBe("Previous context message")
-    expect(sentMessages[0]!.role).toBe("user") // other agent's msg appears as "user"
-    expect(sentMessages[1]!.content).toBe("Follow-up question")
+    // system + History message + current message = 3
+    expect(sentMessages).toHaveLength(3)
+    expect(sentMessages[1]!.content).toBe("Previous context message")
+    expect(sentMessages[1]!.role).toBe("user") // other agent's msg appears as "user"
+    expect(sentMessages[2]!.content).toBe("Follow-up question")
   })
 
   test.skipIf(!hasApiKey)(
-    "agent.run with OpenRouter returns a real response",
+    "agent.run with Venice returns a real response",
     async () => {
       const program = Effect.gen(function* () {
         return yield* testAgent.run("Say the word 'hello' and nothing else.")
@@ -92,7 +90,7 @@ describe("Agent", () => {
 
       const result = await Effect.runPromise(
         program.pipe(
-          Effect.provide(OpenRouterLayer),
+          Effect.provide(VeniceModel()),
           Effect.provide(InMemoryLayer)
         )
       )

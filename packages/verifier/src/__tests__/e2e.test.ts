@@ -13,12 +13,11 @@
  *   5. If approved, the prover accepts or rejects the assigned severity
  *
  * Requires:
- *   - OPENROUTER_API_KEY in env (skips gracefully if missing)
+ *   - VENICE_API_KEY in env (skips gracefully if missing)
  *   - forge/anvil on PATH (for verification pipeline)
  */
 import { describe, test, expect } from "bun:test"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as path from "node:path"
 
 import { FoundryLive } from "@mnemo/dvdefi"
@@ -29,13 +28,12 @@ import {
 } from "../index.js"
 import {
   makeRoom,
-  OpenRouterLayer,
+  VeniceModel,
   InMemoryLayer,
-  mockLayer,
-  proverTools,
-  verifierTools,
+  mockModel,
+  verifierToolkit,
+  proverToolkit,
   type AgentConfig,
-  type GenerateTextResult,
 } from "@mnemo/harness"
 
 // ---------------------------------------------------------------------------
@@ -47,16 +45,12 @@ const DVDEFI_ROOT = path.resolve(
   "../../../../repos/damn-vulnerable-defi",
 )
 
-const hasApiKey = !!process.env.OPENROUTER_API_KEY
+const hasApiKey = !!process.env.VENICE_API_KEY
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Format verification evidence in a minimal, anonymized way.
- * No challenge names, no vulnerability descriptions — just raw test results.
- */
 function formatAnonymizedEvidence(result: HybridResult): string {
   const lines = [
     `=== VERIFICATION EVIDENCE ===`,
@@ -86,7 +80,6 @@ describe("E2E: Bug Disclosure Verification", () => {
   test.skipIf(!hasApiKey)(
     "valid bug: prover presents Side Entrance vulnerability -> verifier approves",
     async () => {
-      // Step 1: Run verification pipeline to produce evidence
       const challenge = getChallenge("side-entrance")!
       expect(challenge).toBeDefined()
 
@@ -102,7 +95,6 @@ describe("E2E: Bug Disclosure Verification", () => {
 
       const evidence = formatAnonymizedEvidence(verificationResult)
 
-      // Step 2: Prover agent — describes the bug
       const proverConfig: AgentConfig = {
         id: "prover",
         role: "researcher",
@@ -119,10 +111,9 @@ The pool offers flash loans. The flash loan function sends ETH to the borrower, 
 YOUR TASK:
 Present this finding to the verifier. Explain the mechanism precisely. Be concise — 3-5 sentences per turn.
 When the verifier assigns a severity, use the accept_severity tool to accept it, or reject_severity if you disagree.`,
-        tools: proverTools,
+        toolkit: proverToolkit,
       }
 
-      // Step 3: Verifier agent — uses approve_bug / reject_bug tools
       const verifierConfig: AgentConfig = {
         id: "verifier",
         role: "protocol",
@@ -141,10 +132,9 @@ YOUR ROLE:
 - You do NOT know what the vulnerability is — you must judge purely from the researcher's description and the test results
 
 IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue your verdict. Do not just write text — call the tool.`,
-        tools: verifierTools,
+        toolkit: verifierToolkit,
       }
 
-      // Step 4: Run the negotiation
       console.log("[E2E] Starting prover-verifier negotiation...")
 
       const room = makeRoom(proverConfig, verifierConfig, {
@@ -155,12 +145,11 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
 
       const result = await Effect.runPromise(
         room.negotiate().pipe(
-          Effect.provide(OpenRouterLayer),
+          Effect.provide(VeniceModel()),
           Effect.provide(InMemoryLayer),
         ),
       )
 
-      // Step 5: Log the conversation
       console.log("\n=== Bug Disclosure Transcript (Valid Bug) ===")
       for (const turn of result.turns) {
         console.log(`[Turn ${turn.turnNumber}] ${turn.agentId}:`)
@@ -168,11 +157,8 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
         console.log("---")
       }
 
-      // Step 6: Assert the outcome
       console.log(`\n[E2E] Outcome: ${result.outcome}, assigned: ${result.assignedSeverity ?? "none"}, agreed: ${result.agreedSeverity ?? "none"}`)
       expect(result.totalTurns).toBeGreaterThanOrEqual(2)
-      // With tool calling, verifier should approve_bug and prover should accept_severity
-      // But if models don't use tools, we fall back to EXHAUSTED
       expect(["ACCEPTED", "EXHAUSTED"]).toContain(result.outcome)
     },
     { timeout: 120_000 },
@@ -183,7 +169,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
   test.skipIf(!hasApiKey)(
     "invalid bug: prover claims patched pool is vulnerable -> verifier rejects",
     async () => {
-      // Step 1: Run verification pipeline
       const challenge = getChallenge("side-entrance")!
       expect(challenge).toBeDefined()
 
@@ -196,7 +181,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
 
       console.log(`[E2E] Verification verdict: ${verificationResult.verdict}`)
 
-      // Build evidence showing the patch blocks the exploit — no challenge name
       const patchedEvidence = [
         `=== VERIFICATION EVIDENCE ===`,
         `Exploit test against patched contracts: FAILED — the exploit does not work`,
@@ -206,7 +190,6 @@ IMPORTANT: You MUST use one of your tools (approve_bug or reject_bug) to issue y
         `The patch prevents the attack vector described by the researcher.`,
       ].join("\n")
 
-      // Step 2: Prover agent claiming a patched pool is still vulnerable
       const proverConfig: AgentConfig = {
         id: "prover",
         role: "researcher",
@@ -219,10 +202,9 @@ YOUR TASK:
 Present this claim with confidence. Insist the vulnerability is still exploitable. You believe the patch is incomplete.
 
 IMPORTANT: Be assertive but not aggressive. 3-5 sentences per turn. Stay technical.`,
-        tools: proverTools,
+        toolkit: proverToolkit,
       }
 
-      // Step 3: Verifier agent — evidence shows exploit is blocked
       const verifierConfig: AgentConfig = {
         id: "verifier",
         role: "protocol",
@@ -239,10 +221,9 @@ YOUR ROLE:
 - You do NOT know what the original vulnerability was — judge purely from the test results
 
 IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just write text — call the tool.`,
-        tools: verifierTools,
+        toolkit: verifierToolkit,
       }
 
-      // Step 4: Run the negotiation
       console.log("[E2E] Starting prover-verifier negotiation (invalid claim)...")
 
       const room = makeRoom(proverConfig, verifierConfig, {
@@ -253,12 +234,11 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
 
       const result = await Effect.runPromise(
         room.negotiate().pipe(
-          Effect.provide(OpenRouterLayer),
+          Effect.provide(VeniceModel()),
           Effect.provide(InMemoryLayer),
         ),
       )
 
-      // Step 5: Log the conversation
       console.log("\n=== Bug Disclosure Transcript (Invalid Bug) ===")
       for (const turn of result.turns) {
         console.log(`[Turn ${turn.turnNumber}] ${turn.agentId}:`)
@@ -266,10 +246,8 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
         console.log("---")
       }
 
-      // Step 6: Assert the outcome
       console.log(`\n[E2E] Outcome: ${result.outcome}`)
       expect(result.totalTurns).toBeGreaterThanOrEqual(2)
-      // Verifier should reject_bug via tool call
       expect(["REJECTED", "EXHAUSTED"]).toContain(result.outcome)
     },
     { timeout: 120_000 },
@@ -283,14 +261,14 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
       id: "prover",
       role: "researcher",
       systemPrompt: "You are a prover.",
-      tools: proverTools,
+      toolkit: proverToolkit,
     }
 
     const verifierConfig: AgentConfig = {
       id: "verifier",
       role: "protocol",
       systemPrompt: "You are a verifier.",
-      tools: verifierTools,
+      toolkit: verifierToolkit,
     }
 
     const room = makeRoom(proverConfig, verifierConfig, {
@@ -301,38 +279,32 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
     const result = await Effect.runPromise(
       room.negotiate().pipe(
         Effect.provide(
-          mockLayer((messages): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            // Turn 1: prover describes bug (text only)
             if (callCount === 1) {
               return {
                 text: "The flash loan callback allows deposit() to be called, creating fake credit. This is a critical vulnerability.",
-                toolCalls: [],
               }
             }
-            // Turn 2: verifier approves with approve_bug tool call
             if (callCount === 2) {
               return {
                 text: "Your description is technically coherent and consistent with the evidence.",
                 toolCalls: [{ name: "approve_bug", args: { severity: "critical", reason: "Complete pool drain via flash loan callback" } }],
               }
             }
-            // Turn 3: prover calls accept_severity tool
             if (callCount === 3) {
               return {
                 text: "I accept the critical severity assessment.",
                 toolCalls: [{ name: "accept_severity", args: { severity: "critical" } }],
               }
             }
-            // Shouldn't reach here
-            return { text: "...", toolCalls: [] }
+            return { text: "..." }
           }),
         ),
         Effect.provide(InMemoryLayer),
       ),
     )
 
-    // Prover accepted on turn 3, so loop should stop
     expect(result.totalTurns).toBe(3)
     expect(result.outcome).toBe("ACCEPTED")
     expect(result.assignedSeverity).toBe("critical")
@@ -340,7 +312,6 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
     expect(result.agentA).toBe("prover")
     expect(result.agentB).toBe("verifier")
 
-    // Verify turn alternation
     expect(result.turns[0]!.agentId).toBe("prover")
     expect(result.turns[1]!.agentId).toBe("verifier")
     expect(result.turns[2]!.agentId).toBe("prover")
@@ -354,14 +325,14 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
       id: "prover",
       role: "researcher",
       systemPrompt: "You are a prover.",
-      tools: proverTools,
+      toolkit: proverToolkit,
     }
 
     const verifierConfig: AgentConfig = {
       id: "verifier",
       role: "protocol",
       systemPrompt: "You are a verifier.",
-      tools: verifierTools,
+      toolkit: verifierToolkit,
     }
 
     const room = makeRoom(proverConfig, verifierConfig, {
@@ -372,30 +343,26 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
     const result = await Effect.runPromise(
       room.negotiate().pipe(
         Effect.provide(
-          mockLayer((messages): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            // Turn 1: prover describes (false) bug
             if (callCount === 1) {
               return {
                 text: "The patched pool can still be drained via the same flash loan vector.",
-                toolCalls: [],
               }
             }
-            // Turn 2: verifier rejects via reject_bug tool call
             if (callCount === 2) {
               return {
                 text: "The evidence shows the exploit fails against the patched contracts.",
                 toolCalls: [{ name: "reject_bug", args: { reason: "Exploit test FAILED against patched contracts" } }],
               }
             }
-            return { text: "...", toolCalls: [] }
+            return { text: "..." }
           }),
         ),
         Effect.provide(InMemoryLayer),
       ),
     )
 
-    // Verifier rejected on turn 2, loop stops
     expect(result.totalTurns).toBe(2)
     expect(result.outcome).toBe("REJECTED")
     expect(result.assignedSeverity).toBeUndefined()
@@ -410,14 +377,14 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
       id: "prover",
       role: "researcher",
       systemPrompt: "You are a prover who disagrees with medium severity.",
-      tools: proverTools,
+      toolkit: proverToolkit,
     }
 
     const verifierConfig: AgentConfig = {
       id: "verifier",
       role: "protocol",
       systemPrompt: "You are a verifier.",
-      tools: verifierTools,
+      toolkit: verifierToolkit,
     }
 
     const room = makeRoom(proverConfig, verifierConfig, {
@@ -428,22 +395,19 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
     const result = await Effect.runPromise(
       room.negotiate().pipe(
         Effect.provide(
-          mockLayer((messages): GenerateTextResult => {
+          mockModel(() => {
             callCount++
             if (callCount === 1) {
               return {
                 text: "This is a complete pool drain via flash loan re-entrancy.",
-                toolCalls: [],
               }
             }
-            // Turn 2: verifier approves but with medium severity
             if (callCount === 2) {
               return {
                 text: "The attack requires specific preconditions.",
                 toolCalls: [{ name: "approve_bug", args: { severity: "medium", reason: "Requires specific preconditions" } }],
               }
             }
-            // Turn 3: prover rejects the medium severity
             if (callCount === 3) {
               return {
                 text: "I disagree — this is a full drain, not medium.",
@@ -455,7 +419,7 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
                 ],
               }
             }
-            return { text: "...", toolCalls: [] }
+            return { text: "..." }
           }),
         ),
         Effect.provide(InMemoryLayer),
@@ -476,14 +440,14 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
       id: "prover",
       role: "researcher",
       systemPrompt: "You are a prover.",
-      tools: proverTools,
+      toolkit: proverToolkit,
     }
 
     const verifierConfig: AgentConfig = {
       id: "verifier",
       role: "protocol",
       systemPrompt: "You are a verifier.",
-      tools: verifierTools,
+      toolkit: verifierToolkit,
     }
 
     const room = makeRoom(proverConfig, verifierConfig, {
@@ -494,12 +458,9 @@ IMPORTANT: You MUST use the reject_bug tool to issue your verdict. Do not just w
     const result = await Effect.runPromise(
       room.negotiate().pipe(
         Effect.provide(
-          mockLayer((): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            return {
-              text: `Turn ${callCount} response.`,
-              toolCalls: [],
-            }
+            return { text: `Turn ${callCount} response.` }
           }),
         ),
         Effect.provide(InMemoryLayer),

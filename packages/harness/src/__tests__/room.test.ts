@@ -1,21 +1,22 @@
 /**
  * Room tests — verifies turn-based negotiation between two agents.
  *
- * Requires OPENROUTER_API_KEY for integration tests. Skips gracefully if missing.
+ * Requires VENICE_API_KEY for integration tests. Skips gracefully if missing.
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
 import {
   makeRoom,
   InMemoryLayer,
-  mockLayer,
-  OpenRouterLayer,
+  mockModel,
+  VeniceModel,
   State,
+  verifierToolkit,
+  proverToolkit,
   type AgentConfig,
-  type GenerateTextResult,
 } from "../index.js"
 
-const hasApiKey = !!process.env.OPENROUTER_API_KEY
+const hasApiKey = !!process.env.VENICE_API_KEY
 
 const buyerConfig: AgentConfig = {
   id: "buyer",
@@ -47,9 +48,9 @@ describe("Room", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            return { text: `Response ${callCount}`, toolCalls: [] }
+            return { text: `Response ${callCount}` }
           })
         ),
         Effect.provide(InMemoryLayer)
@@ -66,7 +67,6 @@ describe("Room", () => {
     expect(result.turns[1]!.agentId).toBe("seller")
     expect(result.turns[2]!.agentId).toBe("buyer")
 
-    // Verify each turn has a message
     expect(result.turns[0]!.message).toBe("Response 1")
     expect(result.turns[1]!.message).toBe("Response 2")
     expect(result.turns[2]!.message).toBe("Response 3")
@@ -79,7 +79,7 @@ describe("Room", () => {
 
     const result = await Effect.runPromise(
       program.pipe(
-        Effect.provide(mockLayer((): GenerateTextResult => ({ text: "single turn", toolCalls: [] }))),
+        Effect.provide(mockModel(() => ({ text: "single turn" }))),
         Effect.provide(InMemoryLayer)
       )
     )
@@ -106,9 +106,9 @@ describe("Room", () => {
     const { messages } = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            return { text: `Turn ${callCount}`, toolCalls: [] }
+            return { text: `Turn ${callCount}` }
           })
         ),
         Effect.provide(InMemoryLayer)
@@ -116,8 +116,6 @@ describe("Room", () => {
     )
 
     // Each turn logs: the input message + the agent's response = 2 messages per turn
-    // Turn 1: "Start" (system) + "Turn 1" (buyer)
-    // Turn 2: "Turn 1" (buyer becomes input) + "Turn 2" (seller)
     expect(messages.length).toBe(4)
   })
 
@@ -134,7 +132,7 @@ describe("Room", () => {
 
       const result = await Effect.runPromise(
         program.pipe(
-          Effect.provide(OpenRouterLayer),
+          Effect.provide(VeniceModel()),
           Effect.provide(InMemoryLayer)
         )
       )
@@ -144,17 +142,14 @@ describe("Room", () => {
       expect(result.agentB).toBe("seller")
       expect(result.outcome).toBe("EXHAUSTED")
 
-      // Verify alternation
       expect(result.turns[0]!.agentId).toBe("buyer")
       expect(result.turns[1]!.agentId).toBe("seller")
       expect(result.turns[2]!.agentId).toBe("buyer")
 
-      // Verify each turn has non-empty content
       for (const turn of result.turns) {
         expect(turn.message.length).toBeGreaterThan(0)
       }
 
-      // Log the conversation for manual inspection
       console.log("\n=== Negotiation Transcript ===")
       for (const turn of result.turns) {
         console.log(`[Turn ${turn.turnNumber}] ${turn.agentId}: ${turn.message}`)

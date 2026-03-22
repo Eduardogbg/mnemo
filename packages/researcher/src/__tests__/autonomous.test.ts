@@ -1,14 +1,14 @@
 /**
- * Autonomous agent unit test with mock Provider.
+ * Autonomous agent unit test with mock LanguageModel.
  */
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
-import { mockLayer, InMemoryLayer, type GenerateTextResult } from "@mnemo/core"
+import { mockModel, InMemoryLayer } from "@mnemo/core"
 import { runAutonomous } from "../AutonomousAgent.js"
 import { ExecutionLogLive } from "../ExecutionLog.js"
 
 describe("AutonomousAgent", () => {
-  test("runs through phases with mock provider", async () => {
+  test("runs through phases with mock model", async () => {
     let callCount = 0
 
     const program = runAutonomous({
@@ -20,10 +20,9 @@ describe("AutonomousAgent", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            // Return [DONE] to end each phase quickly
-            return { text: `Phase response ${callCount}. [DONE]`, toolCalls: [] }
+            return { text: `Phase response ${callCount}. [DONE]` }
           })
         ),
         Effect.provide(InMemoryLayer),
@@ -48,9 +47,12 @@ describe("AutonomousAgent", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          mockLayer((): GenerateTextResult => {
+          mockModel(() => {
             callCount++
-            return { text: `Response ${callCount}`, toolCalls: [{ name: "analyze_challenge", args: { challengeId: "test" } }] }
+            return {
+              text: `Response ${callCount}`,
+              toolCalls: [{ name: "analyze_challenge", args: { challengeId: "test" } }],
+            }
           })
         ),
         Effect.provide(InMemoryLayer),
