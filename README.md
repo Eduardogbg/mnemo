@@ -1,10 +1,8 @@
 # Mnemo
 
-Private negotiation rooms with scoped reveals -- SQL transactions for sensitive information.
+Autonomous security agents that are **verifiably incapable of exploitation** — they can only do responsible disclosure. Built on Venice (private inference) and Phala (TEE execution), the researcher agent runs inside a hardware enclave where it structurally cannot sign transactions, leak findings, or communicate outside the negotiation protocol. It can find vulnerabilities but it cannot exploit them — enforced by hardware, not policy.
 
-Mnemo is a protocol for autonomous vulnerability disclosure where **information is only revealed if the protocol commits funds**. A researcher agent discovers a vulnerability, but the protocol learns nothing about it until they lock payment into escrow. If the vulnerability is verified, the researcher is paid automatically. If it's not real, the protocol is refunded. No trust required from either side.
-
-The researcher agent runs inside a TEE (hardware enclave) with read-only chain access. It cannot sign transactions, cannot leak data, and cannot communicate outside the negotiation protocol.
+Mnemo is a protocol for autonomous vulnerability disclosure where **information is only revealed if the protocol commits funds**. The researcher agent discovers a vulnerability, but the protocol learns nothing about it until they lock payment into escrow. If the vulnerability is verified, the researcher is paid automatically. If it's not real, the protocol is refunded. No trust required from either side.
 
 **Live on Base Sepolia.**
 
