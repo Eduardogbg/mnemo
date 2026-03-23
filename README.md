@@ -127,6 +127,12 @@ Additional guarantees:
 - ERC-8004 on-chain identity and reputation for agents
 - Effect-based architecture throughout (typed errors, DI, streaming)
 
+## A Note on the Demo
+
+In production, **you would see none of this.** The entire point is that the agent operates inside a TEE black box — nobody can observe what it's researching, what vulnerabilities it found, or what it's analyzing. The only externally visible artifacts are: (1) which bugs it submitted, and (2) whether they were accepted. Everything else — the LLM audit, the negotiation, the verification — happens inside hardware-encrypted memory that not even the host operator can read.
+
+The demo exposes the agent's internals (streaming audit, negotiation transcript, pipeline steps) purely for demonstration purposes, so you can see the mechanism working end to end. In a real deployment, this visibility would not exist.
+
 ## How to Run
 
 ### Prerequisites
