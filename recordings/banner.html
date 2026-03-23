@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200, height=630">
+<title>mnemo — banner</title>
+<style>
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+  }
+
+  body {
+    background: #09090b;
+    color: #fafafa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  /* Subtle grid pattern */
+  body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(52, 211, 153, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(52, 211, 153, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* Top-left accent glow */
+  body::after {
+    content: "";
+    position: absolute;
+    top: -120px;
+    left: -120px;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(52, 211, 153, 0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .container {
+    text-align: center;
+    max-width: 960px;
+    padding: 0 3rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .logo {
+    font-size: 6.5rem;
+    font-weight: 700;
+    color: #34d399;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .tagline {
+    font-size: 1.75rem;
+    font-weight: 400;
+    color: #e4e4e7;
+    margin-top: 1rem;
+    line-height: 1.4;
+  }
+
+  .subtitle {
+    font-size: 1.15rem;
+    font-weight: 300;
+    color: #a1a1aa;
+    margin-top: 0.6rem;
+    line-height: 1.5;
+  }
+
+  .divider {
+    width: 64px;
+    height: 2px;
+    background: #34d399;
+    margin: 2rem auto;
+    opacity: 0.6;
+  }
+
+  .stack {
+    font-size: 0.95rem;
+    color: #52525b;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .stack span {
+    color: #71717a;
+  }
+
+  /* Bottom-right accent glow */
+  .glow-br {
+    position: absolute;
+    bottom: -100px;
+    right: -100px;
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, rgba(52, 211, 153, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <div class="glow-br"></div>
+  <div class="container">
+    <div class="logo">mnemo</div>
+    <div class="tagline">A fair mechanism for bug disclosure</div>
+    <div class="subtitle">Autonomous security agents that verifiably can't exploit</div>
+    <div class="divider"></div>
+    <div class="stack">
+      <span>Venice</span> · <span>Phala</span> · <span>Base Sepolia</span> · <span>ERC-8004</span>
+    </div>
+  </div>
+</body>
+</html>
