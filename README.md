@@ -28,16 +28,15 @@ The incentive structure needs to change so that:
 
 Mnemo solves this with three mechanisms:
 
-**1. Escrow-gated information reveal.** This is the core primitive. The researcher's agent signals it has a finding (a `DisclosureIntent` — no details, just "I found something"). The protocol must fund an on-chain escrow to learn what it is. No payment, no information. The block is pinned at intent time so the protocol can't patch first and dispute later.
+**1. Escrow-gated information reveal.** This is the core primitive. The researcher's agent signals it has a finding (a `DisclosureIntent` — no details, just "I found something"). The protocol must fund an on-chain escrow to learn what it is. No payment, no information.
 
 **2. TEE-secured negotiation rooms.** Both agents negotiate inside a Phala dstack enclave with hardware-encrypted memory (Intel TDX). Neither party — nor the host operator — can read the other's data. The researcher reveals vulnerability details only inside the room, only after escrow is funded. If negotiation fails, the enclave is destroyed and nothing leaks.
 
 **3. Automated verification and settlement.** The TEE runs verification (currently forge tests, but the arbiter is pluggable). If the vulnerability is confirmed, escrow releases payment automatically. If invalid, the protocol is refunded. No human arbitration, no disputes.
 
 Additional guarantees:
-- **Pinned block**: pinned at DisclosureIntent time — the protocol cannot patch-then-dispute
-- **RTMR[3] attestation**: the exact code running in the TEE is cryptographically bound to the attestation — change one byte, attestation fails
-- **Network isolation**: the researcher agent has read-only RPC access, cannot sign transactions, cannot communicate outside the room
+- **RTMR[3] attestation**: the exact code running in the TEE is cryptographically bound to the attestation — change one byte, attestation fails (simulated in demo, real in CVM deployment)
+- **Network isolation**: the researcher agent has read-only RPC access, cannot sign transactions, cannot communicate outside the room (enforced via Docker network policies in production Compose)
 - **Privacy separation**: registry and escrow are independent on-chain — observers cannot correlate which listing a disclosure belongs to
 
 ## Architecture
@@ -108,14 +107,14 @@ Additional guarantees:
 - Wired into the negotiation flow (verification result auto-triggers escrow resolution)
 
 **Negotiation Rooms**
-- Turn-based agent dialogue with scoped reveals
+- Turn-based agent dialogue with tool-gated severity assignment
 - Room manager orchestrates the full 10-step pipeline
 - PubSub event streaming to frontend via WebSocket
 
 **TEE Integration**
 - Phala dstack attestation (RTMR[3], compose hash verification)
-- Docker Compose topology: simulator + harness + E2E containers
-- Deterministic builds for exact attestation binding
+- Docker Compose topology with network isolation (analysis, egress-restricted, default)
+- RPC proxy that blocks write methods (`eth_sendRawTransaction`, `eth_sign`, etc.)
 
 **Frontend**
 - React 19 + Tailwind v4
@@ -124,8 +123,8 @@ Additional guarantees:
 
 **Supporting Infrastructure**
 - Venice E2EE client (reverse-engineered ECDH + HKDF + AES-256-GCM protocol)
-- IPFS archival of evidence with deterministic CIDs
-- ERC-8004 on-chain identity for agents
+- IPFS archival of disclosure evidence
+- ERC-8004 on-chain identity and reputation for agents
 - Effect-based architecture throughout (typed errors, DI, streaming)
 
 ## How to Run
@@ -217,9 +216,11 @@ Mnemo is designed for responsible disclosure, not exploitation. The researcher a
 
 ## Caveats
 
-- The DVDeFi challenge contracts (SideEntrance, etc.) are well-known vulnerabilities likely present in LLM training data. The agent finding them is a valid proof of mechanism, not a proof of novel discovery capability.
-- On-chain TDX quote verification is not implemented. The demo uses hash commitment (Option C from the design doc). Production would need a DCAP verifier or attestation oracle.
-- Venice inference is private (no data retention) but not TEE-protected on the standard endpoint. Production deployment would use Redpill (GPU-TEE) or Venice E2EE models.
+- The DVDeFi challenge contracts (SideEntrance, etc.) are well-known vulnerabilities likely present in LLM training data. The agent finding them is a proof of mechanism, not a proof of novel discovery capability.
+- TEE attestation is simulated outside a CVM. The demo generates stub quotes; real RTMR[3] binding requires deployment inside a Phala dstack CVM.
+- The demo escrow flow is ceremonial — the same entity creates, funds, and resolves. In production, the protocol and TEE would be separate actors with the escrow gating information flow.
+- Network isolation (RPC proxy, air-gapped Docker networks) only applies when running the production Docker Compose inside a CVM, not in the local demo.
+- The agent can only process pre-mapped DVDeFi challenges, not arbitrary contracts. General-purpose discovery requires a more flexible metadata→contract resolution pipeline.
 
 ## Built At
 
