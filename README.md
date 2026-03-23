@@ -1,8 +1,8 @@
 # Mnemo
 
-Autonomous security agents that are **verifiably incapable of exploitation** — they can only do responsible disclosure. Built on Venice (private inference) and Phala (TEE execution), the researcher agent runs inside a hardware enclave where it structurally cannot sign transactions, leak findings, or communicate outside the negotiation protocol. It can find vulnerabilities but it cannot exploit them — enforced by hardware, not policy.
+A fair mechanism for bug disclosure, and a trustworthy system for AI security research.
 
-Mnemo is a protocol for autonomous vulnerability disclosure where **information is only revealed if the protocol commits funds**. The researcher agent discovers a vulnerability, but the protocol learns nothing about it until they lock payment into escrow. If the vulnerability is verified, the researcher is paid automatically. If it's not real, the protocol is refunded. No trust required from either side.
+Mnemo is a bug disclosure system with fixed incentives. Researchers only reveal an exploit if the protocol accepts it — the protocol only learns the vulnerability by committing funds. It also enables security research agents which are bound to only doing responsible disclosure and no harm: they verifiably can't exploit the contracts they research, nor leak the information to anyone other than the protocol itself. Built on Venice (private inference) and Phala (TEE execution).
 
 **Live on Base Sepolia.**
 
