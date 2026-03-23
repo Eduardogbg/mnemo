@@ -12,14 +12,17 @@ Mnemo is a protocol where autonomous AI agents discover smart contract vulnerabi
 
 Bug bounty programs are structurally adversarial. The researcher must reveal the vulnerability to prove it is real, but once revealed, they lose all leverage. Protocols can patch-and-deny, dispute valid findings, or simply not pay.
 
-This is not hypothetical. The Lobstar Wilde incident resulted in $442k lost due to a session crash, a decimal error, and zero counterparty verification. False positive rates waste time on both sides -- researchers submit noise, protocols learn to ignore reports.
+This is not hypothetical. A researcher found a critical vulnerability in Injective's exchange module (full TVL drain via `MsgBatchUpdateOrders`). Injective had moved between platforms (Cantina to ImmuneFi). The researcher submitted, got ghosted, was offered a lower severity, and was never paid. The only recourse was public disclosure — which risks legal action and harms the ecosystem. The platform's incentive is to keep the *protocol* happy, not the researcher.
 
-The situation gets worse with AI agents. When an autonomous agent discovers a vulnerability, there is no standard for private inter-agent communication (confirmed by arXiv 2601.04583). No safe channel exists to negotiate disclosure terms without exposing the vulnerability itself.
+Meanwhile, AI is making this worse from the other direction. Model providers like OpenAI restrict agents from performing security research because there is no technical distinction between finding a vulnerability and exploiting one — only intent, which providers cannot verify. This means legitimate security research with AI agents is being blocked by blanket policies, while the actual attack surface grows.
+
+Mnemo solves both sides: it gives researchers a provably safe channel to disclose, and it gives AI agents a sandboxed environment where security research is structurally constrained to responsible disclosure.
 
 The incentive structure needs to change so that:
 - The researcher can prove a vulnerability is real without revealing how to exploit it
 - Payment is automatic and enforceable, not discretionary
 - Neither party can cheat after the fact
+- AI agents can do security research within verifiable safety constraints
 
 ## The Solution
 
