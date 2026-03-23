@@ -6,7 +6,7 @@ Mnemo is a protocol for autonomous vulnerability disclosure where **information 
 
 The researcher agent runs inside a TEE (hardware enclave) with read-only chain access. It cannot sign transactions, cannot leak data, and cannot communicate outside the negotiation protocol.
 
-**Live on Base Sepolia.** Formally specified in Quint (15 invariants, 10k traces clean).
+**Live on Base Sepolia.**
 
 ---
 
@@ -86,9 +86,9 @@ Additional guarantees:
 4. **Registry** -- protocol registers on MnemoRegistry with bounty terms
 5. **Discovery** -- researcher agent polls registry events, scores targets
 6. **Audit** -- LLM analyzes contract source, generates vulnerability hypothesis
-7. **Verification** -- forge runs exploit test + patched test = cryptographic proof
+7. **Verification** -- TEE arbiter verifies the vulnerability claim
 8. **Negotiation** -- turn-based dialogue in TEE room, scoped reveals
-9. **Settlement** -- escrow auto-releases on forge pass, auto-refunds on fail
+9. **Settlement** -- escrow auto-releases on verified bug, auto-refunds on invalid
 10. **Post-settlement** -- reputation posted to ERC-8004, evidence archived to IPFS
 
 ## What We Shipped
@@ -123,11 +123,6 @@ Additional guarantees:
 - React 19 + Tailwind v4
 - Live WebSocket streaming of all pipeline events
 - 10-step pipeline tracker, audit panel, escrow state display
-
-**Formal Specification**
-- Quint spec: 7 modules (types, negotiation, session, attestation, context, properties, scenarios)
-- 15 protocol invariants verified across 10k random traces
-- Protocol spec v3 (scoped reveals) and v4 (Vegas Room / black box TEE model)
 
 **Supporting Infrastructure**
 - Venice E2EE client (reverse-engineered ECDH + HKDF + AES-256-GCM protocol)
@@ -195,7 +190,6 @@ cd contracts && forge test -vv
 | Inference | Venice API (private, no data retention) |
 | Identity | ERC-8004 (on-chain agent reputation) |
 | Frontend | React 19, Tailwind v4, WebSocket |
-| Formal spec | Quint |
 | Chain | Base Sepolia |
 
 ## Package Structure
