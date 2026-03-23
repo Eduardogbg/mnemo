@@ -2,9 +2,11 @@
 
 Private negotiation rooms with scoped reveals -- SQL transactions for sensitive information.
 
-Mnemo is a protocol where autonomous AI agents discover smart contract vulnerabilities, prove them with forge tests, and settle bounties through TEE-secured escrow. The researcher agent runs inside a hardware enclave with read-only chain access. It cannot sign transactions, leak data, or communicate outside the negotiation protocol. If the vulnerability is real (forge confirms it), payment is automatic. No human judgment, no disputes.
+Mnemo is a protocol for autonomous vulnerability disclosure where **information is only revealed if the protocol commits funds**. A researcher agent discovers a vulnerability, but the protocol learns nothing about it until they lock payment into escrow. If the vulnerability is verified, the researcher is paid automatically. If it's not real, the protocol is refunded. No trust required from either side.
 
-**Live on Base Sepolia.** 40 passing contract tests. Formally specified in Quint (7 modules, 15 invariants, 10k traces clean).
+The researcher agent runs inside a TEE (hardware enclave) with read-only chain access. It cannot sign transactions, cannot leak data, and cannot communicate outside the negotiation protocol.
+
+**Live on Base Sepolia.** Formally specified in Quint (15 invariants, 10k traces clean).
 
 ---
 
@@ -26,19 +28,19 @@ The incentive structure needs to change so that:
 
 ## The Solution
 
-Mnemo solves this with three mechanisms working together:
+Mnemo solves this with three mechanisms:
 
-**1. Forge-verified proofs.** The researcher writes a Foundry exploit test. If the test passes against the live contract and fails against a patched version, the vulnerability is cryptographically proven. No trust required -- forge output is deterministic.
+**1. Escrow-gated information reveal.** This is the core primitive. The researcher's agent signals it has a finding (a `DisclosureIntent` — no details, just "I found something"). The protocol must fund an on-chain escrow to learn what it is. No payment, no information. The block is pinned at intent time so the protocol can't patch first and dispute later.
 
-**2. TEE-secured rooms.** Both agents negotiate inside a Phala dstack enclave. Hardware-encrypted memory (Intel TDX) means neither party -- nor the host operator -- can read the session state. If negotiation fails, the enclave is destroyed. Nothing leaks.
+**2. TEE-secured negotiation rooms.** Both agents negotiate inside a Phala dstack enclave with hardware-encrypted memory (Intel TDX). Neither party — nor the host operator — can read the other's data. The researcher reveals vulnerability details only inside the room, only after escrow is funded. If negotiation fails, the enclave is destroyed and nothing leaks.
 
-**3. Escrow-gated auto-release.** The protocol funds an on-chain escrow to learn the vulnerability details. If forge confirms the exploit is real, the researcher is paid automatically. If the exploit is invalid, the protocol is refunded. The TEE resolves the escrow -- no human arbitration.
+**3. Automated verification and settlement.** The TEE runs verification (currently forge tests, but the arbiter is pluggable). If the vulnerability is confirmed, escrow releases payment automatically. If invalid, the protocol is refunded. No human arbitration, no disputes.
 
 Additional guarantees:
-- **Pinned block**: the block number is pinned at DisclosureIntent time, so the protocol cannot patch the vulnerability and then dispute the finding
-- **RTMR[3] attestation**: the exact Docker image hash is bound to the TEE attestation -- change one byte of agent code, the attestation fails
-- **Network isolation**: the researcher agent has read-only RPC access (`eth_sendRawTransaction` is blocked), cannot sign transactions, and can only communicate through the negotiation protocol
-- **Privacy separation**: the on-chain registry and escrow are deliberately independent -- observers cannot correlate which registry listing a disclosure belongs to
+- **Pinned block**: pinned at DisclosureIntent time — the protocol cannot patch-then-dispute
+- **RTMR[3] attestation**: the exact code running in the TEE is cryptographically bound to the attestation — change one byte, attestation fails
+- **Network isolation**: the researcher agent has read-only RPC access, cannot sign transactions, cannot communicate outside the room
+- **Privacy separation**: registry and escrow are independent on-chain — observers cannot correlate which listing a disclosure belongs to
 
 ## Architecture
 
@@ -104,9 +106,8 @@ Additional guarantees:
 - Tested against DVDeFi challenge suite -- found SideEntrance reentrancy blind in ~30s
 
 **Verification Pipeline**
-- Forge-based: exploit test must pass on original, fail on patched contract
-- Deterministic output = no judgment calls
-- Wired into the negotiation flow (auto-triggers escrow resolution)
+- Pluggable arbiter design — current implementation uses forge, but the escrow contract accepts any TEE-attested verdict
+- Wired into the negotiation flow (verification result auto-triggers escrow resolution)
 
 **Negotiation Rooms**
 - Turn-based agent dialogue with scoped reveals
