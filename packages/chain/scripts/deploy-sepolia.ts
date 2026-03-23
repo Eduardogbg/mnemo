@@ -399,13 +399,17 @@ const program = Effect.gen(function* () {
   yield* Console.log(`      Address: ${deployerAddress}`)
 
   // Layer stacks for voltaire-effect
-  const writeStack = Layer.mergeAll(
-    Signer.Live,
+  // Signer.Live depends on AccountService (from LocalAccount) + HttpProvider + Crypto
+  const infraLayer = Layer.mergeAll(
     LocalAccount(config.privateKey as any),
     HttpProviderFetch(config.rpcUrl),
     HttpTransport(config.rpcUrl),
     CryptoLive,
     FetchHttpClient.layer,
+  )
+
+  const writeStack = Layer.provide(Signer.Live, infraLayer).pipe(
+    Layer.merge(infraLayer),
   )
 
   const readStack = Layer.mergeAll(

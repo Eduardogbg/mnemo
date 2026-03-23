@@ -1,0 +1,65 @@
+{
+  "type": "autonomous-agent",
+  "name": "Mnemo Ethical Hacker",
+  "version": "0.1.0",
+  "description": "Autonomous security researcher running in a TEE that is provably incapable of exploitation. Discovers vulnerabilities, verifies them with formal tools, and discloses through privacy-preserving negotiation rooms.",
+  "services": [
+    {
+      "type": "bug-disclosure",
+      "description": "Discovers and responsibly discloses smart contract vulnerabilities through negotiated rooms with escrow-backed bounties.",
+      "protocol": "mnemo-negotiation-v1"
+    }
+  ],
+  "registrations": {
+    "erc8004": {
+      "chain": "base-sepolia",
+      "identityRegistry": "0x8004A818154A60E50A4271D1be4F2eBcCBBbAD76",
+      "reputationRegistry": "0x8004B663890Df62C3beAa5E898e77D1efDE8C49a"
+    }
+  },
+  "supportedTrust": ["reputation", "tee-attestation"],
+  "tools": [
+    {
+      "name": "analyze_challenge",
+      "description": "Run forge-only verification pipeline against a DVDeFi challenge",
+      "type": "verification"
+    },
+    {
+      "name": "request_room",
+      "description": "Request a negotiation room for bug disclosure with evidence",
+      "type": "negotiation"
+    },
+    {
+      "name": "report_finding",
+      "description": "Log a security finding with severity and description",
+      "type": "reporting"
+    },
+    {
+      "name": "accept_severity",
+      "description": "Accept the severity level assigned by the verifier",
+      "type": "negotiation"
+    },
+    {
+      "name": "reject_severity",
+      "description": "Reject the severity level assigned by the verifier",
+      "type": "negotiation"
+    }
+  ],
+  "compute_constraints": {
+    "runtime": "phala-cvm",
+    "attestation": "intel-tdx",
+    "network": {
+      "analysis": "air-gapped",
+      "rpc": "read-only-proxy",
+      "inference": "gpu-tee"
+    },
+    "signing": "none-mainnet"
+  },
+  "task_categories": [
+    "smart-contract-vulnerability-discovery",
+    "formal-verification",
+    "responsible-disclosure",
+    "bounty-negotiation"
+  ],
+  "execution_log": "agent_log.json"
+}
